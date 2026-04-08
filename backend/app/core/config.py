@@ -56,8 +56,19 @@ class Settings(BaseSettings):
     OPENAI_MAX_TOKENS: int = Field(default=4000, description="最大token数")
     
     # LLM提供商配置
-    LLM_PROVIDER: str = Field(default="openai", description="LLM提供商: openai/kimi/deepseek/yuanbao")
+    LLM_PROVIDER: str = Field(default="deepseek", description="LLM提供商: openai/kimi/deepseek/yuanbao/local_llama")
     CHAT2API_BASE_URL: str = Field(default="http://localhost:8000", description="chat2api服务地址")
+
+    # DeepSeek API（直接调用，不需要chat2api）
+    DEEPSEEK_API_KEY: str = Field(default="", description="DeepSeek API密钥")
+    DEEPSEEK_BASE_URL: str = Field(default="https://api.deepseek.com", description="DeepSeek API地址")
+    DEEPSEEK_MODEL: str = Field(default="deepseek-chat", description="DeepSeek模型")
+
+    # 本地Llama模型（Agentic RL训练用）
+    LOCAL_LLAMA_MODEL_PATH: str = Field(default="D:/002 llm ware/models", description="本地模型目录")
+    LOCAL_LLAMA_MAX_TOKENS: int = Field(default=2048, description="本地模型最大token数")
+    LOCAL_LLAMA_CONTEXT_WINDOW: int = Field(default=4096, description="本地模型上下文窗口大小")
+    OLLAMA_BASE_URL: str = Field(default="http://localhost:11434", description="Ollama服务地址（如果有）")
     
     # 小说生成配置
     MAX_CHAPTERS: int = Field(default=1000, description="最大章节数")

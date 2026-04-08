@@ -36,8 +36,8 @@ const defaultConfigs: Record<string, LLMConfig> = {
   deepseek: {
     provider: 'deepseek',
     apiKey: '',
-    baseUrl: 'http://localhost:8088',
-    model: 'deepseek',
+    baseUrl: 'https://api.deepseek.com',
+    model: 'deepseek-chat',
   },
   yuanbao: {
     provider: 'yuanbao',
@@ -170,6 +170,55 @@ export function LLMSettings() {
           responseTime,
           response: reply,
         })
+      } else if (config.provider === 'deepseek') {
+        // DeepSeek Direct API Test
+        addLog(`Sending test request to DeepSeek Direct API...`)
+        
+        if (!config.apiKey) {
+          throw new Error('DeepSeek API Key not set')
+        }
+        
+        const testUrl = `${config.baseUrl}/chat/completions`
+        addLog(`Request URL: ${testUrl}`)
+        
+        const response = await fetch(testUrl, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'Authorization': `Bearer ${config.apiKey}`,
+          },
+          body: JSON.stringify({
+            model: config.model || 'deepseek-chat',
+            messages: [
+              { role: 'system', content: 'You are a test assistant.' },
+              { role: 'user', content: 'Reply with "OK" only.' },
+            ],
+            max_tokens: 50,
+          }),
+        })
+        
+        const responseTime = Date.now() - startTime
+        
+        if (!response.ok) {
+          const errorData = await response.json().catch(() => ({}))
+          throw new Error(errorData.error?.message || `HTTP ${response.status}`)
+        }
+        
+        const data = await response.json()
+        const reply = data.choices?.[0]?.message?.content || 'No reply'
+        
+        addLog(`Got reply, took ${responseTime}ms`)
+        
+        const responseTimeSec = Math.round(responseTime / 1000)
+        setConfig(prev => ({ ...prev, responseTime: responseTimeSec }))
+        
+        setTestResult({
+          success: true,
+          message: 'DeepSeek Connected',
+          responseTime,
+          response: reply,
+        })
+      
       } else {
         // 测试 Chat2Api 服务
         addLog(`发送测试请求到 ${config.provider}...`)
