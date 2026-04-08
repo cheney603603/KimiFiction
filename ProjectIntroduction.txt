@@ -1,0 +1,369 @@
+ 这是一个非常复杂的**多智能体协作系统（Multi-Agent Novel Generation System）**。我将为你设计完整的系统架构，并提供可用于AI编程助手（如Claude、GPT-4）生成代码的详细提示词。
+
+## 一、系统架构设计
+
+### 1. 多智能体协作架构（Agent Orchestra）
+
+```mermaid
+graph TD
+    User[用户] --> Web[Web前端]
+    Web --> API[FastAPI网关]
+    
+    subgraph "智能体协作层 LangGraph"
+    API --> Coordinator[协调器Agent<br/>状态机管理]
+    Coordinator --> Analyzer[需求分析Agent<br/>分析小说类型/风格]
+    Coordinator --> Architect[剧情架构Agent<br/>世界观/主线/冲突]
+    Coordinator --> Character[角色设计Agent<br/>人设/关系/成长弧]
+    Coordinator --> Outline[大纲生成Agent<br/>分卷/章节节点]
+    Coordinator --> Writer[章节撰写Agent<br/>正文生成]
+    Coordinator --> Consistency[一致性检查Agent<br/>剧情连续性]
+    Coordinator --> Memory[记忆管理Agent<br/>RAG检索/摘要]
+    end
+    
+    subgraph "数据层"
+    MySQL[(MySQL<br/>小说/章节/角色)]
+    VectorDB[(向量数据库<br/>Qdrant/Pinecone<br/>剧情记忆)]
+    Redis[(Redis<br/>会话状态)]
+    end
+    
+    Writer --> MySQL
+    Writer --> VectorDB
+    Memory --> VectorDB
+```
+
+### 2. 关键设计模式
+
+**长文本记忆解决方案**：
+- **分层摘要**：每10章生成一次中级摘要，每100章生成高级摘要
+- **向量检索**：关键剧情节点、角色状态向量化存储
+- **记忆窗口**：智能体始终携带"近期10章 + 关键剧情节点 + 角色当前状态"
+
+**状态机工作流**：
+```python
+# 状态定义
+STATES = [
+    "AWAITING_GENRE",      # 等待确认类型
+    "DISCUSSING_PLOT",     # 商讨剧情
+    "DESIGNING_CHARS",     # 设计角色
+    "GENERATING_OUTLINE",  # 生成大纲
+    "WRITING_CHAPTER",     # 撰写章节
+    "REVIEWING",           # 人工审核
+    "CONTINUING"           # 自动续写
+]
+```
+
+## 二、数据库设计（MySQL Schema）
+
+```sql
+-- 小说项目表
+CREATE TABLE novels (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    title VARCHAR(255),
+    genre VARCHAR(100),          -- 玄幻/科幻/都市等
+    style_prompt TEXT,           -- 风格提示词
+    total_chapters INT DEFAULT 0,
+    current_chapter INT DEFAULT 0,
+    status ENUM('planning', 'writing', 'paused', 'completed'),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
+);
+
+-- 章节表（分表策略：每本小说独立表或按百万章分表）
+CREATE TABLE chapters (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    novel_id BIGINT,
+    chapter_number INT,
+    title VARCHAR(255),
+    content LONGTEXT,            -- 章节正文
+    summary TEXT,                -- 本章摘要
+    key_events JSON,             -- 关键事件
+    characters_present JSON,     -- 出场角色
+    word_count INT,
+    status ENUM('draft', 'review', 'published'),
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    INDEX idx_novel_chapter (novel_id, chapter_number)
+);
+
+-- 角色表
+CREATE TABLE characters (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    novel_id BIGINT,
+    name VARCHAR(100),
+    role_type ENUM('protagonist', 'antagonist', 'supporting', 'minor'),
+    profile JSON,                -- 详细人设
+    current_status TEXT,         -- 当前状态（动态更新）
+    first_appearance INT,        -- 首次出场章节
+    arc_progress FLOAT           -- 角色弧光进度 0-1
+);
+
+-- 剧情大纲表
+CREATE TABLE outlines (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    novel_id BIGINT,
+    volume_number INT,           -- 第几卷
+    volume_title VARCHAR(255),
+    arcs JSON,                   -- 剧情弧数组
+    key_points TEXT,             -- 关键节点
+    target_chapters INT          -- 预计章节数
+);
+
+-- 记忆向量表（与向量数据库同步）
+CREATE TABLE memory_nodes (
+    id BIGINT PRIMARY KEY AUTO_INCREMENT,
+    novel_id BIGINT,
+    node_type ENUM('plot_point', 'character_moment', 'world_building', 'mystery'),
+    content TEXT,
+    chapter_range VARCHAR(50),   -- 涉及章节范围
+    importance_score FLOAT,      -- 重要性 0-1
+    embedding_id VARCHAR(255)    -- 向量库ID
+);
+```
+
+## 三、代码生成提示词
+
+以下提示词可直接用于AI编程助手生成各模块代码。建议分阶段实现。
+
+### 提示词 1：后端基础架构（FastAPI + MySQL）
+
+```markdown
+请生成一个基于FastAPI的多智能体小说生成系统的后端基础架构代码，要求：
+
+1. **项目结构**：
+   - app/
+     - core/ (配置、数据库连接)
+     - models/ (SQLAlchemy ORM模型)
+     - agents/ (智能体定义)
+     - workflows/ (LangGraph状态机)
+     - api/ (路由)
+     - services/ (业务逻辑)
+   - alembic/ (数据库迁移)
+
+2. **核心依赖**：
+   - fastapi + uvicorn
+   - sqlalchemy + aiomysql (异步MySQL)
+   - langchain + langgraph (智能体编排)
+   - qdrant-client (向量数据库)
+   - redis (状态缓存)
+   - pydantic-settings (配置管理)
+
+3. **实现内容**：
+   - 完整的MySQL模型类（Novel, Chapter, Character, Outline, MemoryNode）
+   - 数据库连接池配置（支持异步）
+   - 基础CRUD API（小说创建、章节获取、角色管理）
+   - Docker Compose配置（app + mysql + qdrant + redis）
+
+4. **特别要求**：
+   - 使用Repository模式封装数据库操作
+   - 实现软删除和乐观锁机制
+   - 添加详细的中文注释
+
+请生成可直接运行的完整代码。
+```
+
+### 提示词 2：多智能体系统核心（LangGraph）
+
+```markdown
+请实现基于LangGraph的多智能体协调系统，用于网络小说生成：
+
+1. **状态定义（TypedDict）**：
+   - current_state: 当前工作流状态
+   - novel_id: 小说ID
+   - user_input: 用户最新输入
+   - genre_analysis: 类型分析结果
+   - characters: 角色列表（含状态）
+   - outline: 大纲结构
+   - current_chapter: 当前撰写章节号
+   - context_window: 携带的上下文（最近章节+关键记忆）
+   - memory_search_results: RAG检索结果
+
+2. **智能体实现（6个Node）**：
+   - analyze_requirements: 分析用户输入，提取类型、风格、偏好（使用LLM JSON模式输出）
+   - discuss_plot: 与用户多轮对话确定主线剧情（支持中断等待用户）
+   - design_characters: 生成详细角色卡（MBTI、目标、冲突、成长线）
+   - generate_outline: 生成三级大纲（卷-章-关键事件），确保1000章可扩展性
+   - write_chapter: 撰写具体章节（携带角色状态、前文摘要、相关记忆）
+   - check_consistency: 检查剧情一致性（检索向量库比对人物行为、设定冲突）
+
+3. **边逻辑（Edge）**：
+   - 实现条件路由：根据state.current_state决定下一步
+   - 实现人机协作节点：关键决策点暂停等待用户确认
+   - 实现循环：章节撰写后可选自动继续或人工审核
+
+4. **记忆增强**：
+   - 集成RAG：在write_chapter前自动检索相关历史剧情
+   - 动态摘要：每完成10章自动生成分层摘要更新到向量库
+
+5. **要求**：
+   - 使用LangGraph的StateGraph构建
+   - 智能体使用OpenAI API或兼容接口（可配置）
+   - 添加详细的日志记录（记录每个节点的决策过程）
+   - 实现重试机制和错误回退
+
+生成完整可运行的Python代码。
+```
+
+### 提示词 3：长文本记忆管理模块
+
+```markdown
+请实现一个专门解决"长篇小说1000章不遗忘"的记忆管理系统：
+
+1. **分层记忆架构**：
+   - Level 1 (工作记忆): 最近3章完整内容 + 当前角色状态
+   - Level 2 (短期记忆): 最近10章的详细摘要
+   - Level 3 (中期记忆): 每10章生成的卷摘要（关键剧情转折点）
+   - Level 4 (长期记忆): 每100章生成的故事线摘要 + 核心设定集
+
+2. **向量检索系统**：
+   - 使用Qdrant存储剧情节点
+   - 自动提取实体：人物、地点、功法/能力、未解之谜、伏笔
+   - 检索策略：
+     * 撰写前检索：当前章节涉及的角色历史行为
+     * 一致性检查：检索相似场景避免矛盾
+     * 伏笔回收：标记早期"未解之谜"在合适时机自动提示
+
+3. **记忆压缩算法**：
+   - 实现summarize_with_importance函数：生成摘要时标记重要性分数
+   - 实现compress_old_chapters：当章节数>50时，自动将旧章节压缩为记忆节点并清理原文（保留在数据库但不在上下文携带）
+
+4. **上下文组装**：
+   - build_context(novel_id, current_chapter) -> str
+   - 智能体prompt模板：包含"世界观设定"、"当前主线"、"出场角色当前状态"、"相关历史事件"
+
+5. **代码要求**：
+   - 异步实现（async/await）
+   - 与SQLAlchemy模型集成
+   - 提供手动触发"整理记忆"的API接口
+   - 包含测试用例（模拟100章后的记忆检索）
+
+生成完整Python代码和数据库模型。
+```
+
+### 提示词 4：前端Web界面（React + Tailwind）
+
+```markdown
+请实现多智能体小说生成系统的前端界面（React 18 + Tailwind CSS + TypeScript）：
+
+1. **布局结构**：
+   - 左侧边栏：小说列表、当前小说结构（卷/章节目录树）
+   - 中央区域：主工作区（根据当前状态动态变化）
+   - 右侧边栏：角色卡片、世界观设定、写作统计
+   - 顶部：全局导航、当前小说标题、运行状态指示器
+
+2. **核心页面/组件**：
+
+   **Dashboard（工作台）**：
+   - 显示进行中的小说卡片（进度条、最新章节、下次生成预估）
+   - "新建小说"按钮 -> 启动类型分析Agent
+   
+   **Interactive Chat（协商界面）**：
+   - 类ChatGPT的对话界面
+   - 特殊消息类型：Agent建议（可一键采纳）、分歧点标记、剧情分支图
+   - 支持Markdown渲染和代码块（用于显示大纲JSON）
+   
+   **Outline Editor（大纲编辑器）**：
+   - 树形结构编辑：卷 -> 章 -> 关键事件
+   - 可视化时间线（角色弧光、剧情起伏线）
+   - 拖拽调整章节顺序
+   - "重新生成"按钮触发Outline Agent
+   
+   **Chapter Reader（阅读/审核界面）**：
+   - 仿起点中文网阅读页：目录导航、字体调整、夜间模式
+   - 批注功能：在段落上标记"逻辑问题"、"需要润色"
+   - AI续写控制面板：设置生成模式（自动/手动）、调整温度参数、查看Agent思考过程
+   
+   **Character Manager（角色管理）**：
+   - 角色卡片网格（头像、姓名、状态标签）
+   - 关系图谱可视化（使用ECharts或D3力导向图）
+   - 编辑角色状态（同步到数据库）
+
+3. **实时功能**：
+   - WebSocket连接显示Agent正在思考/生成的实时状态
+   - 章节生成进度条（流式显示生成内容）
+   - 通知系统：Agent等待用户决策时推送浏览器通知
+
+4. **UI/UX细节**：
+   - 深色/浅色主题切换
+   - 响应式设计（支持平板阅读）
+   - 加载骨架屏、动画过渡
+   - 使用Lucide React图标库
+
+5. **API集成**：
+   - 使用React Query进行数据获取
+   - 实现乐观更新（章节编辑后立即显示，后台同步）
+   - 错误边界处理
+
+生成完整的React组件代码和TypeScript类型定义。
+```
+
+### 提示词 5：章节撰写Agent（核心生成逻辑）
+
+```markdown
+请实现专门用于撰写网文章节的智能体（Chapter Writing Agent），要求能够写出高质量、连贯的长篇小说：
+
+1. **Prompt Engineering**：
+   - 系统提示词包含：小说类型风格指南、当前卷目标、角色当前心理状态
+   - 动态few-shot：根据类型从数据库检索3个相似章节的写作风格示例
+   - 输出格式：严格JSON包含title, content, summary, key_events, cliffhanger_score
+
+2. **生成策略**：
+   - "大纲遵循"检查：确保本章覆盖大纲要求的关键事件
+   - "节奏控制"：根据章节位置调整（开篇引入->发展->高潮-> cliffhanger）
+   - "角色声音"：不同角色对话风格差异化（通过few-shot示例实现）
+   - "伏笔埋设"：随机选择1-2个长期记忆节点在本章轻微提及
+
+3. **后处理流水线**：
+   - 自动分段：按对话和场景自动划分段落
+   - 敏感词过滤：替换或标记敏感内容
+   - 字数检查：确保达到目标字数（2000-5000字），不足则触发"扩写"子Agent
+   - 润色模式：可选"简洁"、"华丽"、"热血"等风格重加工
+
+4. **质量评估**：
+   - 实现evaluate_chapter函数：从剧情推进、角色塑造、文笔流畅度打分
+   - 如果分数<7/10，自动触发重写（最多3次，避免死循环）
+
+5. **代码结构**：
+   - ChapterWriter类，包含write()、rewrite()、expand()方法
+   - 集成记忆管理模块获取上下文
+   - 流式生成支持（yield逐段输出到前端）
+   - 生成本章后自动更新角色状态（如受伤、突破境界、关系变化）
+
+生成可独立运行的Python代码，包含详细注释。
+```
+
+## 四、实施路线图建议
+
+建议按以下4个阶段实施，保证功能的完善:
+
+### Phase 1: 基础框架
+- 完成提示词1的基础架构
+- 实现基础CRUD和数据库
+- 简单的前端章节展示
+
+### Phase 2: 智能体核心
+- 实现提示词2的LangGraph工作流
+- 实现提示词3的记忆管理
+- 完成人与Agent的协商流程
+
+### Phase 3: 自动化生成
+- 实现提示词5的章节撰写Agent
+- 实现自动续写循环（撰写->审核->更新记忆->下一章）
+- 压力测试（模拟生成50章）
+
+### Phase 4: 高级功能
+- 完善前端（提示词4的所有界面）
+- 角色关系图谱
+- 细粒度的人工干预（修改特定段落让AI续写）
+
+## 五、关键注意事项
+
+1. **校验测试**：每次功能模块完善后，要进行测试，确定内容是否完善。
+2. **数据库性能**：1000章×5000字=500万字，建议：
+   - MySQL使用TEXT类型存储内容
+   - 为(novel_id, chapter_number)添加复合索引
+   - 考虑按novel_id分表或归档策略
+
+3. **一致性保障**：
+   - 在Consistency Agent中实现"设定锁"：核心设定（如修为体系）变更需人工确认
+   - 定期进行"剧情审计"：检索所有包含某角色的章节检查行为一致性
+
+4. **计划确认**：你需要在做的过程中不断回顾本计划，并在Progress.txt中记录你的进度

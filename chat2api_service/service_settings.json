@@ -1,0 +1,14 @@
+{
+  "browser": {
+    "headless": false,
+    "slow_mo": 500
+  },
+  "timeout": {
+    "chat_timeout": 500,
+    "login_timeout": 500,
+    "response_timeout": 500,
+    "min_wait_time": 20,
+    "max_stable_time": 5,
+    "element_wait_timeout": 5
+  }
+}

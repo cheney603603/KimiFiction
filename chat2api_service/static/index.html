@@ -1,0 +1,1366 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>AI Chat API 服务</title>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        
+        .container {
+            max-width: 1000px;
+            margin: 0 auto;
+        }
+        
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 30px;
+        }
+        
+        .header h1 {
+            font-size: 2.5em;
+            margin-bottom: 10px;
+        }
+        
+        .header p {
+            opacity: 0.9;
+            font-size: 1.1em;
+        }
+        
+        .card {
+            background: white;
+            border-radius: 16px;
+            padding: 25px;
+            margin-bottom: 20px;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.1);
+        }
+        
+        .card-title {
+            font-size: 1.3em;
+            color: #333;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .status-badge {
+            display: inline-flex;
+            align-items: center;
+            gap: 6px;
+            padding: 6px 12px;
+            border-radius: 20px;
+            font-size: 0.85em;
+            font-weight: 500;
+        }
+        
+        .status-logged-in {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .status-not-logged {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .status-checking {
+            background: #fff3cd;
+            color: #856404;
+        }
+        
+        .btn {
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            font-size: 0.95em;
+            cursor: pointer;
+            transition: all 0.3s ease;
+        }
+        
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+        
+        .btn-primary:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+        }
+        
+        .btn-success {
+            background: #28a745;
+            color: white;
+        }
+        
+        .btn-success:hover {
+            background: #218838;
+        }
+        
+        .btn-secondary {
+            background: #6c757d;
+            color: white;
+        }
+        
+        .btn-secondary:hover {
+            background: #5a6268;
+        }
+        
+        .btn:disabled {
+            opacity: 0.6;
+            cursor: not-allowed;
+        }
+        
+        /* AI 选择器样式 */
+        .ai-selector {
+            display: flex;
+            gap: 10px;
+            margin-bottom: 20px;
+            flex-wrap: wrap;
+        }
+        
+        .ai-option {
+            flex: 1;
+            min-width: 150px;
+            padding: 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 12px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            text-align: center;
+        }
+        
+        .ai-option:hover {
+            border-color: #667eea;
+            transform: translateY(-2px);
+        }
+        
+        .ai-option.selected {
+            border-color: #667eea;
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+        }
+        
+        .ai-option .ai-name {
+            font-weight: 600;
+            font-size: 1.1em;
+            color: #333;
+            margin-bottom: 5px;
+        }
+        
+        .ai-option .ai-desc {
+            font-size: 0.85em;
+            color: #666;
+        }
+        
+        .ai-option .ai-status {
+            margin-top: 8px;
+            font-size: 0.8em;
+        }
+        
+        /* 状态卡片样式 */
+        .provider-status-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 15px;
+            margin-top: 15px;
+        }
+        
+        .provider-status-card {
+            padding: 15px;
+            border-radius: 12px;
+            border: 2px solid #e0e0e0;
+            transition: all 0.3s ease;
+        }
+        
+        .provider-status-card.active {
+            border-color: #667eea;
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.05) 0%, rgba(118, 75, 162, 0.05) 100%);
+        }
+        
+        .provider-status-card .provider-name {
+            font-weight: 600;
+            margin-bottom: 8px;
+        }
+        
+        .provider-status-card .provider-status {
+            font-size: 0.9em;
+        }
+        
+        .chat-area {
+            margin-top: 20px;
+        }
+        
+        .messages {
+            height: 400px;
+            overflow-y: auto;
+            border: 1px solid #e0e0e0;
+            border-radius: 12px;
+            padding: 15px;
+            margin-bottom: 15px;
+            background: #fafafa;
+        }
+        
+        .message {
+            margin-bottom: 15px;
+            animation: fadeIn 0.3s ease;
+        }
+        
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        
+        .message-user {
+            text-align: right;
+        }
+        
+        .message-user .bubble {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            display: inline-block;
+            padding: 10px 15px;
+            border-radius: 18px 18px 4px 18px;
+            max-width: 85%;
+            text-align: left;
+            word-wrap: break-word;
+        }
+        
+        .message-ai .bubble {
+            background: white;
+            border: 1px solid #e0e0e0;
+            display: inline-block;
+            padding: 10px 15px;
+            border-radius: 18px 18px 18px 4px;
+            max-width: 85%;
+            word-wrap: break-word;
+            text-align: left;
+        }
+        
+        /* Markdown 样式 */
+        .message-ai .bubble h1,
+        .message-ai .bubble h2,
+        .message-ai .bubble h3,
+        .message-ai .bubble h4 {
+            margin-top: 10px;
+            margin-bottom: 8px;
+            color: #333;
+        }
+        
+        .message-ai .bubble p {
+            margin-bottom: 8px;
+            line-height: 1.6;
+        }
+        
+        .message-ai .bubble code {
+            background: #f4f4f4;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 0.9em;
+        }
+        
+        .message-ai .bubble pre {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 8px;
+            overflow-x: auto;
+            margin: 10px 0;
+        }
+        
+        .message-ai .bubble pre code {
+            background: transparent;
+            padding: 0;
+            color: inherit;
+        }
+        
+        .message-ai .bubble ul,
+        .message-ai .bubble ol {
+            margin-left: 20px;
+            margin-bottom: 8px;
+        }
+        
+        .message-ai .bubble li {
+            margin-bottom: 4px;
+        }
+        
+        .message-ai .bubble blockquote {
+            border-left: 4px solid #667eea;
+            margin: 10px 0;
+            padding-left: 15px;
+            color: #666;
+        }
+        
+        .message-ai .bubble table {
+            border-collapse: collapse;
+            margin: 10px 0;
+            width: 100%;
+        }
+        
+        .message-ai .bubble th,
+        .message-ai .bubble td {
+            border: 1px solid #ddd;
+            padding: 8px;
+            text-align: left;
+        }
+        
+        .message-ai .bubble th {
+            background: #f5f5f5;
+        }
+        
+        .message-time {
+            font-size: 0.75em;
+            color: #999;
+            margin-top: 4px;
+        }
+        
+        .input-area {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .input-area input {
+            flex: 1;
+            padding: 12px 15px;
+            border: 2px solid #e0e0e0;
+            border-radius: 10px;
+            font-size: 1em;
+            transition: border-color 0.3s;
+        }
+        
+        .input-area input:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .input-area button {
+            padding: 12px 25px;
+        }
+        
+        .login-section {
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            align-items: center;
+            margin-top: 15px;
+        }
+        
+        .info-box {
+            background: #e3f2fd;
+            border-left: 4px solid #2196f3;
+            padding: 15px;
+            border-radius: 4px;
+            margin-top: 15px;
+        }
+        
+        .info-box h4 {
+            color: #1976d2;
+            margin-bottom: 8px;
+        }
+        
+        .info-box ol {
+            margin-left: 20px;
+            color: #555;
+        }
+        
+        .info-box li {
+            margin-bottom: 5px;
+        }
+        
+        .spinner {
+            display: inline-block;
+            width: 16px;
+            height: 16px;
+            border: 2px solid #fff;
+            border-top-color: transparent;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+        }
+        
+        @keyframes spin {
+            to { transform: rotate(360deg); }
+        }
+        
+        .api-section {
+            margin-top: 20px;
+        }
+        
+        .code-block {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 15px;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-family: 'Consolas', 'Monaco', monospace;
+            font-size: 0.9em;
+            margin-top: 10px;
+        }
+        
+        .code-block .comment {
+            color: #6a9955;
+        }
+        
+        .code-block .keyword {
+            color: #569cd6;
+        }
+        
+        .code-block .string {
+            color: #ce9178;
+        }
+        
+        .footer {
+            text-align: center;
+            color: rgba(255,255,255,0.8);
+            margin-top: 30px;
+            font-size: 0.9em;
+        }
+        
+        .provider-badge {
+            display: inline-block;
+            padding: 2px 8px;
+            border-radius: 12px;
+            font-size: 0.75em;
+            margin-left: 8px;
+            background: #667eea;
+            color: white;
+        }
+        
+        /* 功能选择区域样式 */
+        .features-section {
+            margin-bottom: 15px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            border: 1px solid #e9ecef;
+        }
+        
+        .features-title {
+            font-size: 0.9em;
+            font-weight: 600;
+            color: #495057;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .features-grid {
+            display: flex;
+            gap: 12px;
+            flex-wrap: wrap;
+        }
+        
+        .feature-item {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            padding: 8px 14px;
+            background: white;
+            border: 2px solid #dee2e6;
+            border-radius: 8px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-size: 0.9em;
+        }
+        
+        .feature-item:hover {
+            border-color: #667eea;
+        }
+        
+        .feature-item.active {
+            border-color: #667eea;
+            background: linear-gradient(135deg, rgba(102, 126, 234, 0.1) 0%, rgba(118, 75, 162, 0.1) 100%);
+        }
+        
+        .feature-item input[type="checkbox"] {
+            width: 16px;
+            height: 16px;
+            cursor: pointer;
+        }
+        
+        .feature-item select {
+            border: none;
+            background: transparent;
+            font-size: 0.9em;
+            cursor: pointer;
+            outline: none;
+        }
+        
+        .feature-description {
+            font-size: 0.8em;
+            color: #6c757d;
+            margin-top: 5px;
+        }
+        
+        /* 配置面板样式 */
+        .settings-section {
+            margin-bottom: 20px;
+        }
+        
+        .settings-group {
+            margin-bottom: 20px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 10px;
+            border: 1px solid #e9ecef;
+        }
+        
+        .settings-group-title {
+            font-size: 1em;
+            font-weight: 600;
+            color: #495057;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .settings-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 15px;
+        }
+        
+        .setting-item {
+            display: flex;
+            flex-direction: column;
+            gap: 5px;
+        }
+        
+        .setting-item label {
+            font-size: 0.9em;
+            color: #495057;
+            font-weight: 500;
+        }
+        
+        .setting-item .setting-desc {
+            font-size: 0.8em;
+            color: #6c757d;
+        }
+        
+        .setting-item input[type="number"] {
+            padding: 8px 12px;
+            border: 2px solid #dee2e6;
+            border-radius: 6px;
+            font-size: 0.95em;
+            width: 100%;
+            transition: border-color 0.3s;
+        }
+        
+        .setting-item input[type="number"]:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        
+        .setting-item .range-hint {
+            font-size: 0.75em;
+            color: #adb5bd;
+        }
+        
+        .setting-toggle {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 10px;
+            background: white;
+            border-radius: 8px;
+            border: 2px solid #dee2e6;
+        }
+        
+        .setting-toggle input[type="checkbox"] {
+            width: 20px;
+            height: 20px;
+            cursor: pointer;
+        }
+        
+        .settings-actions {
+            display: flex;
+            gap: 10px;
+            margin-top: 15px;
+            flex-wrap: wrap;
+        }
+        
+        .settings-toggle-btn {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            padding: 8px 16px;
+            border-radius: 8px;
+            cursor: pointer;
+            font-size: 0.9em;
+            transition: all 0.3s ease;
+        }
+        
+        .settings-toggle-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 5px 20px rgba(102, 126, 234, 0.4);
+        }
+        
+        #settingsPanel {
+            display: block;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🤖 AI Chat API</h1>
+            <p>支持 Kimi、DeepSeek、豆包、腾讯元宝的统一 API 服务</p>
+        </div>
+        
+        <!-- 配置卡片 -->
+        <div class="card">
+            <div class="card-title">
+                ⚙️ 服务配置
+                <button class="settings-toggle-btn" onclick="toggleSettingsPanel()">
+                    <span id="settingsToggleText">收起配置</span>
+                </button>
+            </div>
+            <div id="settingsPanel">
+                <div class="settings-section">
+                    <!-- 浏览器配置 -->
+                    <div class="settings-group">
+                        <div class="settings-group-title">🌐 浏览器设置</div>
+                        <div class="settings-grid">
+                            <div class="setting-item">
+                                <div class="setting-toggle">
+                                    <input type="checkbox" id="setting-headless" onchange="updateSetting('browser', 'headless', this.checked)">
+                                    <div>
+                                        <label for="setting-headless">无头模式</label>
+                                        <div class="setting-desc">后台运行，不显示浏览器窗口</div>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="setting-item">
+                                <label>操作延迟 (毫秒)</label>
+                                <div class="setting-desc">浏览器操作的延迟时间</div>
+                                <input type="number" id="setting-slow_mo" min="0" max="5000" step="50"
+                                       onchange="updateSetting('browser', 'slow_mo', parseInt(this.value))">
+                                <div class="range-hint">范围: 0 - 5000</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- 超时配置 -->
+                    <div class="settings-group">
+                        <div class="settings-group-title">⏱️ 超时时间设置 (秒)</div>
+                        <div class="settings-grid">
+                            <div class="setting-item">
+                                <label>聊天超时</label>
+                                <div class="setting-desc">API聊天请求默认超时</div>
+                                <input type="number" id="setting-chat_timeout" min="30" max="600" step="10"
+                                       onchange="updateSetting('timeout', 'chat_timeout', parseInt(this.value))">
+                                <div class="range-hint">范围: 30 - 600</div>
+                            </div>
+                            <div class="setting-item">
+                                <label>登录超时</label>
+                                <div class="setting-desc">等待登录完成超时</div>
+                                <input type="number" id="setting-login_timeout" min="60" max="600" step="10"
+                                       onchange="updateSetting('timeout', 'login_timeout', parseInt(this.value))">
+                                <div class="range-hint">范围: 60 - 600</div>
+                            </div>
+                            <div class="setting-item">
+                                <label>回复超时</label>
+                                <div class="setting-desc">等待AI回复超时</div>
+                                <input type="number" id="setting-response_timeout" min="30" max="600" step="10"
+                                       onchange="updateSetting('timeout', 'response_timeout', parseInt(this.value))">
+                                <div class="range-hint">范围: 30 - 600</div>
+                            </div>
+                            <div class="setting-item">
+                                <label>最少等待时间</label>
+                                <div class="setting-desc">等待回复的最少时间</div>
+                                <input type="number" id="setting-min_wait_time" min="5" max="60" step="1"
+                                       onchange="updateSetting('timeout', 'min_wait_time', parseInt(this.value))">
+                                <div class="range-hint">范围: 5 - 60</div>
+                            </div>
+                            <div class="setting-item">
+                                <label>稳定判定时间</label>
+                                <div class="setting-desc">内容稳定判定时间</div>
+                                <input type="number" id="setting-max_stable_time" min="1" max="30" step="1"
+                                       onchange="updateSetting('timeout', 'max_stable_time', parseInt(this.value))">
+                                <div class="range-hint">范围: 1 - 30</div>
+                            </div>
+                            <div class="setting-item">
+                                <label>元素等待超时</label>
+                                <div class="setting-desc">等待页面元素超时</div>
+                                <input type="number" id="setting-element_wait_timeout" min="1" max="30" step="1"
+                                       onchange="updateSetting('timeout', 'element_wait_timeout', parseInt(this.value))">
+                                <div class="range-hint">范围: 1 - 30</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <div class="settings-actions">
+                    <button class="btn btn-primary" onclick="saveAllSettings()">💾 保存配置</button>
+                    <button class="btn btn-secondary" onclick="resetSettings()">🔄 恢复默认</button>
+                    <button class="btn btn-secondary" onclick="loadSettings()">📋 重新加载</button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- AI 选择卡片 -->
+        <div class="card">
+            <div class="card-title">🎯 选择 AI 助手</div>
+            <div class="ai-selector" id="aiSelector">
+                <!-- 动态生成 AI 选项 -->
+            </div>
+            <div class="info-box">
+                <h4>📖 使用说明</h4>
+                <ol>
+                    <li>从上方选择要使用的 AI 助手</li>
+                    <li>点击"打开登录页面"按钮，浏览器会自动打开对应 AI 网站</li>
+                    <li>在打开的浏览器窗口中完成登录</li>
+                    <li>登录成功后，点击"确认已登录"按钮</li>
+                    <li>然后在下方输入框中输入消息，点击发送即可</li>
+                </ol>
+            </div>
+        </div>
+        
+        <!-- 状态卡片 -->
+        <div class="card">
+            <div class="card-title">
+                📊 登录状态
+                <span id="currentProviderBadge" class="provider-badge">Kimi</span>
+            </div>
+            <div class="provider-status-grid" id="providerStatusGrid">
+                <!-- 动态生成状态卡片 -->
+            </div>
+            <div class="login-section">
+                <button class="btn btn-primary" onclick="startLogin()">
+                    🔑 打开登录页面
+                </button>
+                <button class="btn btn-success" onclick="confirmLogin()">
+                    ✓ 确认已登录
+                </button>
+                <button class="btn btn-secondary" onclick="checkAllStatus()">
+                    🔄 刷新状态
+                </button>
+                <button class="btn btn-secondary" onclick="restartBrowser()">
+                    🔄 重启浏览器
+                </button>
+            </div>
+        </div>
+        
+        <!-- 聊天卡片 -->
+        <div class="card">
+            <div class="card-title">
+                💬 聊天
+                <span id="chatProviderBadge" class="provider-badge">Kimi</span>
+            </div>
+            
+            <!-- 功能选择区域 -->
+            <div class="features-section" id="featuresSection" style="display: none;">
+                <div class="features-title">⚙️ 功能设置</div>
+                <div class="features-grid" id="featuresGrid">
+                    <!-- 动态生成功能选项 -->
+                </div>
+            </div>
+            
+            <div class="chat-area">
+                <div class="messages" id="messages">
+                    <div class="message message-ai">
+                        <div class="bubble">你好！我是 AI 助手。请先选择 AI 并完成登录，然后我们就可以开始聊天了。</div>
+                        <div class="message-time">刚刚</div>
+                    </div>
+                </div>
+                <div class="input-area">
+                    <input type="text" id="messageInput" placeholder="输入消息..." 
+                           onkeypress="if(event.key==='Enter') sendMessage()">
+                    <button class="btn btn-primary" id="sendBtn" onclick="sendMessage()">
+                        发送
+                    </button>
+                </div>
+            </div>
+        </div>
+        
+        <!-- API 使用示例 -->
+        <div class="card">
+            <div class="card-title">🔌 API 接口</div>
+            <div class="api-section">
+                <p>你也可以通过代码直接调用 API：</p>
+                <div class="code-block">
+<span class="comment"># Python 示例</span>
+<span class="keyword">import</span> requests
+
+<span class="comment"># 发送消息（指定 AI 提供商）</span>
+response = requests.post(
+    <span class="string">"http://localhost:8000/api/kimi/chat"</span>,  <span class="comment"># 或 deepseek, doubao, yuanbao</span>
+    json={<span class="string">"message"</span>: <span class="string">"你好！"</span>, <span class="string">"timeout"</span>: <span class="string">120</span>}
+)
+<span class="keyword">print</span>(response.json())
+
+<span class="comment"># 检查登录状态</span>
+status = requests.get(<span class="string">"http://localhost:8000/api/status"</span>)
+<span class="keyword">print</span>(status.json())
+
+<span class="comment"># 获取支持的 AI 提供商列表</span>
+providers = requests.get(<span class="string">"http://localhost:8000/api/providers"</span>)
+<span class="keyword">print</span>(providers.json())
+                </div>
+            </div>
+        </div>
+        
+        <div class="footer">
+            <p>AI Chat API Service | 支持 Kimi、DeepSeek、豆包、腾讯元宝</p>
+        </div>
+    </div>
+    
+    <script>
+        const API_BASE = '';
+        let providers = {};
+        let currentProvider = '';
+        let providerStatuses = {};
+        
+        // 当前配置
+        let currentSettings = {};
+        
+        // 页面加载时初始化
+        window.onload = async function() {
+            await loadProviders();
+            await checkAllStatus();
+            await loadSettings();
+        };
+        
+        // ==================== 配置管理 ====================
+        
+        // 切换配置面板显示
+        function toggleSettingsPanel() {
+            const panel = document.getElementById('settingsPanel');
+            const btnText = document.getElementById('settingsToggleText');
+            if (panel.style.display === 'none' || panel.style.display === '') {
+                panel.style.display = 'block';
+                btnText.textContent = '收起配置';
+            } else {
+                panel.style.display = 'none';
+                btnText.textContent = '展开配置';
+            }
+        }
+        
+        // 加载配置
+        async function loadSettings() {
+            try {
+                const response = await fetch(`${API_BASE}/api/settings`);
+                const data = await response.json();
+                currentSettings = data;
+                
+                // 更新浏览器设置
+                document.getElementById('setting-headless').checked = data.browser.headless;
+                document.getElementById('setting-slow_mo').value = data.browser.slow_mo;
+                
+                // 更新超时设置
+                document.getElementById('setting-chat_timeout').value = data.timeout.chat_timeout;
+                document.getElementById('setting-login_timeout').value = data.timeout.login_timeout;
+                document.getElementById('setting-response_timeout').value = data.timeout.response_timeout;
+                document.getElementById('setting-min_wait_time').value = data.timeout.min_wait_time;
+                document.getElementById('setting-max_stable_time').value = data.timeout.max_stable_time;
+                document.getElementById('setting-element_wait_timeout').value = data.timeout.element_wait_timeout;
+                
+                console.log('[Settings] 配置已加载:', data);
+            } catch (error) {
+                console.error('加载配置失败:', error);
+            }
+        }
+        
+        // 更新单个设置
+        async function updateSetting(category, key, value) {
+            try {
+                const endpoint = category === 'browser' ? '/api/settings/browser' : '/api/settings/timeout';
+                const updateData = { [key]: value };
+                
+                const response = await fetch(`${API_BASE}${endpoint}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify(updateData)
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    console.log(`[Settings] ${category}.${key} 已更新为 ${value}`);
+                    // 更新本地缓存
+                    if (category === 'browser') {
+                        currentSettings.browser[key] = value;
+                    } else {
+                        currentSettings.timeout[key] = value;
+                    }
+                } else {
+                    console.error('更新设置失败:', data);
+                    alert('更新设置失败: ' + data.detail);
+                    // 恢复原值
+                    await loadSettings();
+                }
+            } catch (error) {
+                console.error('更新设置失败:', error);
+                alert('更新设置失败: ' + error.message);
+                // 恢复原值
+                await loadSettings();
+            }
+        }
+        
+        // 保存所有配置
+        async function saveAllSettings() {
+            try {
+                const browserSettings = {
+                    headless: document.getElementById('setting-headless').checked,
+                    slow_mo: parseInt(document.getElementById('setting-slow_mo').value)
+                };
+                
+                const timeoutSettings = {
+                    chat_timeout: parseInt(document.getElementById('setting-chat_timeout').value),
+                    login_timeout: parseInt(document.getElementById('setting-login_timeout').value),
+                    response_timeout: parseInt(document.getElementById('setting-response_timeout').value),
+                    min_wait_time: parseInt(document.getElementById('setting-min_wait_time').value),
+                    max_stable_time: parseInt(document.getElementById('setting-max_stable_time').value),
+                    element_wait_timeout: parseInt(document.getElementById('setting-element_wait_timeout').value)
+                };
+                
+                const response = await fetch(`${API_BASE}/api/settings`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        browser: browserSettings,
+                        timeout: timeoutSettings
+                    })
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    currentSettings = data.settings;
+                    alert('✅ 配置已保存成功！');
+                    console.log('[Settings] 配置已保存:', data.settings);
+                } else {
+                    alert('❌ 保存配置失败: ' + (data.detail || '未知错误'));
+                }
+            } catch (error) {
+                console.error('保存配置失败:', error);
+                alert('❌ 保存配置失败: ' + error.message);
+            }
+        }
+        
+        // 重置为默认配置
+        async function resetSettings() {
+            if (!confirm('确定要恢复默认配置吗？当前配置将丢失。')) {
+                return;
+            }
+            
+            try {
+                const response = await fetch(`${API_BASE}/api/settings/reset`, {
+                    method: 'POST'
+                });
+                
+                const data = await response.json();
+                if (data.success) {
+                    currentSettings = data.settings;
+                    // 更新UI
+                    document.getElementById('setting-headless').checked = data.settings.browser.headless;
+                    document.getElementById('setting-slow_mo').value = data.settings.browser.slow_mo;
+                    document.getElementById('setting-chat_timeout').value = data.settings.timeout.chat_timeout;
+                    document.getElementById('setting-login_timeout').value = data.settings.timeout.login_timeout;
+                    document.getElementById('setting-response_timeout').value = data.settings.timeout.response_timeout;
+                    document.getElementById('setting-min_wait_time').value = data.settings.timeout.min_wait_time;
+                    document.getElementById('setting-max_stable_time').value = data.settings.timeout.max_stable_time;
+                    document.getElementById('setting-element_wait_timeout').value = data.settings.timeout.element_wait_timeout;
+                    
+                    alert('✅ 配置已重置为默认值！');
+                    console.log('[Settings] 配置已重置:', data.settings);
+                } else {
+                    alert('❌ 重置配置失败: ' + (data.detail || '未知错误'));
+                }
+            } catch (error) {
+                console.error('重置配置失败:', error);
+                alert('❌ 重置配置失败: ' + error.message);
+            }
+        }
+        
+        // 加载 AI 提供商列表
+        async function loadProviders() {
+            try {
+                const response = await fetch(`${API_BASE}/api/providers`);
+                const data = await response.json();
+                providers = data.providers;
+                currentProvider = data.default;
+                renderAISelector();
+                renderProviderStatusGrid();
+                updateProviderBadges();
+            } catch (error) {
+                console.error('加载 AI 提供商失败:', error);
+            }
+        }
+        
+        // 渲染 AI 选择器
+        function renderAISelector() {
+            const selector = document.getElementById('aiSelector');
+            selector.innerHTML = '';
+            
+            for (const [key, provider] of Object.entries(providers)) {
+                const option = document.createElement('div');
+                option.className = `ai-option ${key === currentProvider ? 'selected' : ''}`;
+                option.onclick = () => selectProvider(key);
+                option.innerHTML = `
+                    <div class="ai-name">${provider.display_name}</div>
+                    <div class="ai-desc">${provider.description}</div>
+                `;
+                selector.appendChild(option);
+            }
+        }
+        
+        // 渲染提供商状态网格
+        function renderProviderStatusGrid() {
+            const grid = document.getElementById('providerStatusGrid');
+            grid.innerHTML = '';
+            
+            for (const [key, provider] of Object.entries(providers)) {
+                const card = document.createElement('div');
+                card.className = `provider-status-card ${key === currentProvider ? 'active' : ''}`;
+                card.id = `status-card-${key}`;
+                card.innerHTML = `
+                    <div class="provider-name">${provider.display_name}</div>
+                    <div class="provider-status" id="status-text-${key}">
+                        <span class="spinner" style="width: 12px; height: 12px; border-width: 1px;"></span> 检查中...
+                    </div>
+                `;
+                card.onclick = () => selectProvider(key);
+                grid.appendChild(card);
+            }
+        }
+        
+        // 选择 AI 提供商
+        function selectProvider(provider) {
+            currentProvider = provider;
+            renderAISelector();
+            renderProviderStatusGrid();
+            updateProviderBadges();
+            updateStatusDisplay(provider);
+            loadProviderFeatures(provider);
+            
+            // 添加系统消息
+            const providerName = providers[provider]?.display_name || provider;
+            addMessage('system', `已切换到 ${providerName}`);
+        }
+        
+        // 加载提供商功能列表
+        let currentFeatures = {};
+        
+        async function loadProviderFeatures(provider) {
+            try {
+                const response = await fetch(`${API_BASE}/api/${provider}/features`);
+                const data = await response.json();
+                
+                if (data.success && Object.keys(data.features).length > 0) {
+                    currentFeatures = data.features;
+                    renderFeatures(data.features);
+                    document.getElementById('featuresSection').style.display = 'block';
+                } else {
+                    currentFeatures = {};
+                    document.getElementById('featuresSection').style.display = 'none';
+                }
+            } catch (error) {
+                console.error('加载功能列表失败:', error);
+                document.getElementById('featuresSection').style.display = 'none';
+            }
+        }
+        
+        // 渲染功能选项
+        function renderFeatures(features) {
+            const grid = document.getElementById('featuresGrid');
+            grid.innerHTML = '';
+            
+            for (const [key, feature] of Object.entries(features)) {
+                const item = document.createElement('div');
+                item.className = 'feature-item';
+                
+                if (feature.type === 'toggle') {
+                    // Toggle类型（开关）
+                    const isChecked = feature.default ? 'checked' : '';
+                    item.innerHTML = `
+                        <input type="checkbox" id="feature-${key}" ${isChecked} 
+                               onchange="updateFeatureState(this)">
+                        <label for="feature-${key}" style="cursor: pointer;">${feature.name}</label>
+                    `;
+                    if (feature.default) {
+                        item.classList.add('active');
+                    }
+                } else if (feature.type === 'select') {
+                    // Select类型（下拉选择）
+                    let optionsHtml = '';
+                    for (const opt of feature.options) {
+                        const optName = feature.option_names?.[opt] || opt;
+                        const isSelected = opt === feature.default ? 'selected' : '';
+                        optionsHtml += `<option value="${opt}" ${isSelected}>${optName}</option>`;
+                    }
+                    item.innerHTML = `
+                        <label style="margin-right: 5px;">${feature.name}:</label>
+                        <select id="feature-${key}" onchange="updateFeatureState(this)">
+                            ${optionsHtml}
+                        </select>
+                    `;
+                }
+                
+                grid.appendChild(item);
+            }
+        }
+        
+        // 更新功能状态样式
+        function updateFeatureState(element) {
+            const item = element.closest('.feature-item');
+            if (element.type === 'checkbox') {
+                if (element.checked) {
+                    item.classList.add('active');
+                } else {
+                    item.classList.remove('active');
+                }
+            }
+        }
+        
+        // 收集功能设置
+        function collectFeatureSettings() {
+            const settings = {};
+            
+            for (const [key, feature] of Object.entries(currentFeatures)) {
+                const element = document.getElementById(`feature-${key}`);
+                if (!element) continue;
+                
+                if (feature.type === 'toggle') {
+                    // 映射到对应的API参数名
+                    if (key === 'web_search') {
+                        settings.enable_web_search = element.checked;
+                    } else if (key === 'deep_think') {
+                        settings.enable_deep_think = element.checked;
+                    } else if (key === 'deep_research') {
+                        settings.enable_deep_research = element.checked;
+                    }
+                } else if (feature.type === 'select') {
+                    if (key === 'model') {
+                        settings.model = element.value;
+                    }
+                }
+            }
+            
+            return settings;
+        }
+        
+        // 更新提供商标签
+        function updateProviderBadges() {
+            const providerName = providers[currentProvider]?.display_name || currentProvider;
+            document.getElementById('currentProviderBadge').textContent = providerName;
+            document.getElementById('chatProviderBadge').textContent = providerName;
+        }
+        
+        // 检查所有提供商状态
+        async function checkAllStatus() {
+            try {
+                const response = await fetch(`${API_BASE}/api/status`);
+                const data = await response.json();
+                providerStatuses = data;
+                
+                for (const [provider, status] of Object.entries(data)) {
+                    updateStatusDisplay(provider, status);
+                }
+            } catch (error) {
+                console.error('检查状态失败:', error);
+            }
+        }
+        
+        // 更新状态显示
+        function updateStatusDisplay(provider, status) {
+            if (!status) {
+                status = providerStatuses[provider] || { is_logged_in: false, message: '未知' };
+            }
+            
+            const statusText = document.getElementById(`status-text-${provider}`);
+            if (statusText) {
+                if (status.is_logged_in) {
+                    statusText.innerHTML = '✅ 已登录';
+                } else {
+                    statusText.innerHTML = '❌ 未登录';
+                }
+            }
+            
+            providerStatuses[provider] = status;
+        }
+        
+        // 开始登录
+        async function startLogin() {
+            setLoading(true);
+            try {
+                const response = await fetch(`${API_BASE}/api/${currentProvider}/login/start`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                if (data.success) {
+                    addMessage('system', `已打开 ${providers[currentProvider]?.display_name} 登录页面，请在浏览器窗口中完成登录`);
+                }
+            } catch (error) {
+                addMessage('system', '启动登录失败: ' + error.message);
+            }
+            setLoading(false);
+        }
+        
+        // 确认登录
+        async function confirmLogin() {
+            setLoading(true);
+            try {
+                const response = await fetch(`${API_BASE}/api/${currentProvider}/login/confirm`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                if (data.success) {
+                    updateStatusDisplay(currentProvider, { is_logged_in: true, message: '已登录' });
+                    addMessage('ai', `登录成功！现在可以使用 ${providers[currentProvider]?.display_name} 聊天了。`);
+                } else {
+                    addMessage('system', data.message);
+                }
+            } catch (error) {
+                addMessage('system', '确认登录失败: ' + error.message);
+            }
+            setLoading(false);
+        }
+        
+        // 发送消息
+        async function sendMessage() {
+            const input = document.getElementById('messageInput');
+            const message = input.value.trim();
+            
+            if (!message) return;
+            
+            const status = providerStatuses[currentProvider];
+            if (!status || !status.is_logged_in) {
+                addMessage('system', '请先完成登录');
+                return;
+            }
+            
+            // 显示用户消息
+            addMessage('user', message);
+            input.value = '';
+            
+            // 显示加载中
+            const sendBtn = document.getElementById('sendBtn');
+            sendBtn.disabled = true;
+            sendBtn.innerHTML = '<span class="spinner"></span> 发送中...';
+            
+            try {
+                // 收集功能设置
+                const featureSettings = collectFeatureSettings();
+                
+                // 获取 timeout 值
+                const timeoutValue = currentSettings.timeout?.chat_timeout || 240;
+                console.log('[SendMessage] 使用 timeout:', timeoutValue, 'currentSettings:', currentSettings);
+                
+                const response = await fetch(`${API_BASE}/api/${currentProvider}/chat`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        message: message,
+                        timeout: timeoutValue,
+                        ...featureSettings
+                    })
+                });
+                
+                const data = await response.json();
+                
+                if (data.success) {
+                    addMessage('ai', data.data, true);
+                } else {
+                    addMessage('system', '发送失败: ' + data.message);
+                }
+            } catch (error) {
+                addMessage('system', '请求失败: ' + error.message);
+            }
+            
+            sendBtn.disabled = false;
+            sendBtn.innerHTML = '发送';
+        }
+        
+        // 重启浏览器
+        async function restartBrowser() {
+            setLoading(true);
+            try {
+                const response = await fetch(`${API_BASE}/api/${currentProvider}/browser/restart`, {
+                    method: 'POST'
+                });
+                const data = await response.json();
+                updateStatusDisplay(currentProvider, { is_logged_in: false, message: '未登录' });
+                addMessage('system', data.message);
+            } catch (error) {
+                addMessage('system', '重启失败: ' + error.message);
+            }
+            setLoading(false);
+        }
+        
+        // 添加消息到聊天区域
+        function addMessage(type, content, isMarkdown = false) {
+            const messages = document.getElementById('messages');
+            const time = new Date().toLocaleTimeString('zh-CN', { 
+                hour: '2-digit', 
+                minute: '2-digit' 
+            });
+            
+            const div = document.createElement('div');
+            div.className = `message message-${type}`;
+            
+            if (type === 'system') {
+                div.innerHTML = `
+                    <div style="text-align: center; color: #666; font-size: 0.85em; margin: 10px 0;">
+                        ${escapeHtml(content)}
+                    </div>
+                `;
+                messages.appendChild(div);
+                messages.scrollTop = messages.scrollHeight;
+                return;
+            }
+            
+            let displayContent;
+            if (type === 'ai' && isMarkdown) {
+                // 使用 marked 解析 Markdown
+                displayContent = marked.parse(content);
+            } else {
+                displayContent = escapeHtml(content);
+            }
+            
+            div.innerHTML = `
+                <div class="bubble">${displayContent}</div>
+                <div class="message-time">${time}</div>
+            `;
+            
+            messages.appendChild(div);
+            messages.scrollTop = messages.scrollHeight;
+        }
+        
+        // HTML 转义
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        // 设置加载状态
+        function setLoading(loading) {
+            const buttons = document.querySelectorAll('.btn');
+            buttons.forEach(btn => {
+                btn.disabled = loading;
+            });
+        }
+    </script>
+</body>
+</html>

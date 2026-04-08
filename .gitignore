@@ -1,0 +1,49 @@
+﻿# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+*.egg
+*.whl
+dist/
+build/
+*.log
+
+# Node
+node_modules/
+.pnp
+.pnp.js
+.yarn/
+dist/
+dist-ssr/
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Logs
+logs/
+*.log
+*.log.*
+
+# Debug
+debug_llm/
+*.trace.jsonl
+
+# Test output
+*.jsonl
+
+# OS
+.DS_Store
+Thumbs.db
