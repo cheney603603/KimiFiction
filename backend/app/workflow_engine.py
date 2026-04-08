@@ -1099,87 +1099,130 @@ class WorkflowEngine:
         reader_score_threshold = float((writing_params or {}).get("reader_score_threshold", 0.78))
         hook_score_threshold = float((writing_params or {}).get("hook_score_threshold", 0.70))
 
-        reader_agent = self._agents.get("reader")
-        reviewer_agent = self._agents.get("reviewer")
-        result = None
-        reader_result = {}
-        chapter_content = ""
-        loop_history = []
-
-        for loop_round in range(1, writer_reader_max_rounds + 1):
-            loop_input = {
-                **chapter_input,
-                "loop_round": loop_round,
-                "rewrite_round": loop_round,
+        # ── Writer-Reader RL 对抗循环 ──
+        try:
+            from app.writer_reader_rl import WriterReaderLoop
+            rl_loop = WriterReaderLoop(
+                novel_id=self.novel_id,
+                chapter_number=chapter_number,
+                max_rounds=writer_reader_max_rounds,
+                score_threshold=reader_score_threshold,
+            )
+            
+            # 构建完整上下文
+            full_context = {
+                "world_setting": self.state.world_setting,
+                "characters": self.state.characters,
+                "plot_setting": self.state.plot_setting,
+                "writing_style": (writing_params or {}).get("writing_style", "叙事流畅，情节紧凑"),
+                "env_level": (writing_params or {}).get("env_level", "normal"),
+                "dialogue_ratio": (writing_params or {}).get("dialogue_ratio", 0.3),
             }
-            if chapter_content:
-                loop_input["previous_draft"] = chapter_content
-            if reader_result.get("reader_feedback"):
-                loop_input["reader_feedback"] = reader_result["reader_feedback"]
-
-            log_agent_workflow(
-                "writer",
-                "writer_reader_loop_start",
-                context=loop_input,
-                details={"loop_round": loop_round},
+            
+            rl_result = await rl_loop.run(
+                outline=outline,
+                characters=self.state.characters,
+                context=full_context,
+                initial_draft="",
             )
-            result = await self.run_phase(WorkflowPhase.CHAPTER_WRITING, loop_input)
-            if not result.success:
-                return result
-
-            chapter_content = result.data.get("content", "")
-            if reader_agent and chapter_content:
-                reader_input = {
-                    "workflow_id": self.state.workflow_id,
-                    "novel_id": self.novel_id,
-                    "phase": WorkflowPhase.CHAPTER_WRITING.value,
-                    "loop_round": loop_round,
-                    "chapter_number": chapter_number,
-                    "chapter_content": chapter_content,
-                    "outline": outline,
-                    "characters": self.state.characters,
-                    "world_setting": self.state.world_setting,
-                    "plot_setting": self.state.plot_setting,
-                }
-                reader_result = await reader_agent.process(reader_input)
-            else:
-                reader_result = {}
-
-            feedback = reader_result.get("reader_feedback", {})
-            reader_score = float(feedback.get("reader_score", 0) or 0)
-            hook_score = float(feedback.get("hook_score", 0) or 0)
-            continue_reading = bool(feedback.get("would_continue_reading", False))
-            passed = (
-                reader_result.get("success", False)
-                and reader_score >= reader_score_threshold
-                and hook_score >= hook_score_threshold
-                and continue_reading
-            )
-            loop_history.append({
-                "loop_round": loop_round,
-                "reader_score": reader_score,
-                "hook_score": hook_score,
-                "would_continue_reading": continue_reading,
-                "passed": passed,
-            })
-            log_agent_workflow(
-                "reader",
-                "writer_reader_loop_feedback",
-                context={
-                    "workflow_id": self.state.workflow_id,
-                    "novel_id": self.novel_id,
-                    "chapter_number": chapter_number,
-                    "phase": WorkflowPhase.CHAPTER_WRITING.value,
-                    "loop_round": loop_round,
+            
+            result = TaskResult(
+                success=rl_result.get("success", False),
+                phase=WorkflowPhase.CHAPTER_WRITING.value,
+                data={
+                    "content": rl_result.get("final_draft", ""),
+                    "word_count": rl_result.get("word_count", 0),
+                    "reader_feedback": rl_result.get("loop_history", [{}])[-1].get("reader_feedback", {}),
+                    "writer_reader_loop_history": rl_result.get("loop_history", []),
+                    "learning_report": rl_loop.get_learning_report(),
+                    "chapter_reward": rl_result.get("final_reward", 0),
                 },
-                details=loop_history[-1],
             )
-            result.data["reader_feedback"] = feedback
-            result.data["reader_agent_success"] = reader_result.get("success", False)
-            result.data["writer_reader_loop_history"] = loop_history
+            loop_history = rl_result.get("loop_history", [])
+            
+        except Exception as e:
+            logger.warning(f"[write_chapter] Writer-Reader RL循环失败，降级为原逻辑: {e}")
+            # 降级：使用原有的单轮写作逻辑
+            reader_agent = self._agents.get("reader")
+            reviewer_agent = self._agents.get("reviewer")
+            result = None
+            reader_result = {}
+            chapter_content = ""
 
-            if passed:
-                break
+            for loop_round in range(1, writer_reader_max_rounds + 1):
+                loop_input = {
+                    **chapter_input,
+                    "loop_round": loop_round,
+                    "rewrite_round": loop_round,
+                }
+                if chapter_content:
+                    loop_input["previous_draft"] = chapter_content
+                if reader_result.get("reader_feedback"):
+                    loop_input["reader_feedback"] = reader_result["reader_feedback"]
+
+                log_agent_workflow(
+                    "writer",
+                    "writer_reader_loop_start",
+                    context=loop_input,
+                    details={"loop_round": loop_round},
+                )
+                result = await self.run_phase(WorkflowPhase.CHAPTER_WRITING, loop_input)
+                if not result.success:
+                    return result
+
+                chapter_content = result.data.get("content", "")
+                if reader_agent and chapter_content:
+                    reader_input = {
+                        "workflow_id": self.state.workflow_id,
+                        "novel_id": self.novel_id,
+                        "phase": WorkflowPhase.CHAPTER_WRITING.value,
+                        "loop_round": loop_round,
+                        "chapter_number": chapter_number,
+                        "chapter_content": chapter_content,
+                        "outline": outline,
+                        "characters": self.state.characters,
+                        "world_setting": self.state.world_setting,
+                        "plot_setting": self.state.plot_setting,
+                    }
+                    reader_result = await reader_agent.process(reader_input)
+                else:
+                    reader_result = {}
+
+                feedback = reader_result.get("reader_feedback", {})
+                reader_score = float(feedback.get("reader_score", 0) or 0)
+                hook_score = float(feedback.get("hook_score", 0) or 0)
+                continue_reading = bool(feedback.get("would_continue_reading", False))
+                passed = (
+                    reader_result.get("success", False)
+                    and reader_score >= reader_score_threshold
+                    and hook_score >= hook_score_threshold
+                    and continue_reading
+                )
+                loop_history.append({
+                    "loop_round": loop_round,
+                    "reader_score": reader_score,
+                    "hook_score": hook_score,
+                    "would_continue_reading": continue_reading,
+                    "passed": passed,
+                })
+                log_agent_workflow(
+                    "reader",
+                    "writer_reader_loop_feedback",
+                    context={
+                        "workflow_id": self.state.workflow_id,
+                        "novel_id": self.novel_id,
+                        "chapter_number": chapter_number,
+                        "phase": WorkflowPhase.CHAPTER_WRITING.value,
+                        "loop_round": loop_round,
+                    },
+                    details=loop_history[-1],
+                )
+                result.data["reader_feedback"] = feedback
+                result.data["reader_agent_success"] = reader_result.get("success", False)
+                result.data["writer_reader_loop_history"] = loop_history
+
+                if passed:
+                    break
 
         if result and result.success:
             if reviewer_agent and chapter_content:

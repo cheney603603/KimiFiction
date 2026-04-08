@@ -1,9 +1,10 @@
 """
 章节撰写智能体
-支持真正的LLM章节生成
+支持真正的LLM章节生成 + RAG上下文召回 + Writer-Reader RL对抗
 """
 import json
-from typing import Any, Dict, List
+import asyncio
+from typing import Any, Dict, List, Optional
 from loguru import logger
 
 from app.agents.base import BaseAgent
@@ -190,6 +191,24 @@ class ChapterWriterAgent(BaseAgent):
             
             prev_summary = "\n".join(context_parts) if context_parts else ""
             
+            # ── RAG 上下文召回 ──
+            rag_context_str = ""
+            try:
+                from app.rag_system import HierarchicalRAG
+                rag = HierarchicalRAG(novel_id)
+                rag_result = await rag.retrieve_for_writer(outline, top_k=6)
+                rag_context_str = rag_result.get("writer_context", "")
+                if rag_result.get("chunks"):
+                    logger.info(
+                        f"[ChapterWriter] RAG召回: "
+                        f"{len(rag_result['chunks'])}个块, "
+                        f"方法={rag_result['retrieval_method']}, "
+                        f"总分={rag_result['total_score']:.3f}"
+                    )
+            except Exception as e:
+                logger.warning(f"[ChapterWriter] RAG召回失败（非阻塞）: {e}")
+                rag_context_str = ""
+
             # 组合 system prompt
             system_prompt = self.SYSTEM_PROMPT.format(
                 target_words=target_words,
@@ -204,6 +223,9 @@ class ChapterWriterAgent(BaseAgent):
 
 ## 上下文背景
 {prev_summary if prev_summary else "（第一章，无前文背景）"}
+
+## 相关记忆与伏笔（来自RAG召回）
+{rag_context_str if rag_context_str else "（暂无相关记忆）"}
 
 ## 章节细纲
 {outline_content}
