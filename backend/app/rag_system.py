@@ -213,7 +213,7 @@ class HybridRetriever:
     KEYWORD_WEIGHT = 0.4
     
     def __init__(self):
-        self.embedding_service = EmbeddingService()
+        self.retriever.embedding_service = EmbeddingService()
     
     async def retrieve(
         self,
@@ -267,7 +267,7 @@ class HybridRetriever:
         top_k: int
     ) -> List[TextChunk]:
         try:
-            query_vector = await self.embedding_service.get_embedding(query)
+            query_vector = await self.retriever.embedding_service.get_embedding(query)
             if not query_vector:
                 return []
             
@@ -499,7 +499,7 @@ class HierarchicalRAG:
     
     async def _index_chunk(self, chunk: TextChunk) -> bool:
         try:
-            vector = await self.embedding_service.get_embedding(chunk.content)
+            vector = await self.retriever.embedding_service.get_embedding(chunk.content)
             if not vector:
                 logger.warning(f"无法生成向量，跳过chunk: {chunk.chunk_id}")
                 return False

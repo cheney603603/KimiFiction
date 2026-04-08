@@ -11,6 +11,7 @@ LLM服务客户端
 import json
 import asyncio
 import os
+import re
 from typing import Optional, Dict, Any, List, AsyncGenerator
 from enum import Enum
 from loguru import logger
@@ -287,6 +288,7 @@ class LLMService:
                     {"role": "user", "content": user_msg}
                 ],
                 "stream": False,
+                "think": False,  # 禁用思考过程，只输出正文（对deepseek-r1等推理模型有效）
                 "options": {
                     "temperature": self.temperature,
                     "num_predict": self.max_tokens,
@@ -299,7 +301,18 @@ class LLMService:
                 async with session.post(url, json=payload, timeout=aiohttp.ClientTimeout(total=min(self.max_tokens * 2, 600))) as response:
                     if response.status == 200:
                         result = await response.json()
-                        return result.get("message", {}).get("content", "")
+                        raw = result.get("message", {}).get("content", "")
+                        # 过滤掉思考标签（deepseek-r1等推理模型）
+                        # Ollama deepseek-r1 格式: <think><think>...content...</think><answer>
+                        # 用 split 分离：['content', '<think>', 'thinking...', '</think>', 'answer']
+                        parts = re.split(r'(<think>|</think>)', raw)
+                        if len(parts) >= 3:
+                            # 实际回复 = 最后一个 part 的第一行非空内容
+                            for part in reversed(parts):
+                                cleaned = part.strip()
+                                if cleaned:
+                                    return cleaned
+                        return raw.strip()
                     else:
                         text = await response.text()
                         raise ValueError(f"Ollama调用失败: HTTP {response.status}, {text}")
