@@ -113,6 +113,25 @@ class Novel(Base):
         cascade="all, delete-orphan",
         lazy="selectin"
     )
+    # Rubric评测相关关系
+    rubric_evaluations: Mapped[List["RubricEvaluation"]] = relationship(
+        "RubricEvaluation",
+        back_populates="novel",
+        cascade="all, delete-orphan",
+        lazy="selectin"
+    )
+    training_episodes: Mapped[List["TrainingEpisode"]] = relationship(
+        "TrainingEpisode",
+        back_populates="novel",
+        cascade="all, delete-orphan",
+        lazy="selectin"
+    )
+    comparison_reports: Mapped[List["ComparisonReport"]] = relationship(
+        "ComparisonReport",
+        back_populates="novel",
+        cascade="all, delete-orphan",
+        lazy="selectin"
+    )
     
     def __repr__(self) -> str:
         return f"<Novel(id={self.id}, title='{self.title}', status='{self.status.value}')>"

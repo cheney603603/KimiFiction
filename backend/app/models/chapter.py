@@ -86,6 +86,12 @@ class Chapter(Base):
         cascade="all, delete-orphan",
         lazy="selectin"
     )
+    rubric_evaluations: Mapped[List["RubricEvaluation"]] = relationship(
+        "RubricEvaluation",
+        back_populates="chapter",
+        cascade="all, delete-orphan",
+        lazy="selectin"
+    )
     
     def __repr__(self) -> str:
         return f"<Chapter(id={self.id}, novel_id={self.novel_id}, number={self.chapter_number}, title='{self.title}')>"
