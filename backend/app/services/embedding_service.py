@@ -1,53 +1,228 @@
 """
-文本嵌入服务
+文本嵌入服务 - 支持BGE-large-zh模型
 提供文本向量化和语义搜索功能
 """
 import hashlib
+import os
 from typing import List, Dict, Any, Optional
+from functools import lru_cache
 from loguru import logger
 
 from app.core.vector_store import vector_store, VectorSearchResult
+from app.core.config import settings
 
 
-class EmbeddingService:
-    """文本嵌入服务"""
+class BGEEmbeddingProvider:
+    """
+    BGE-large-zh 嵌入模型提供者
+    
+    使用BAAI/bge-large-zh-v1.5模型，支持中英文语义理解
+    模型维度: 1024
+    支持的最大序列长度: 512 tokens
+    """
+    
+    _instance = None
+    _model = None
+    _tokenizer = None
+    
+    def __new__(cls):
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+        return cls._instance
     
     def __init__(self):
-        self._mock_vectors = True  # 模拟模式，实际使用时接入真实嵌入模型
+        self.model_name = "BAAI/bge-large-zh-v1.5"
+        self.vector_dim = settings.VECTOR_DIM  # 从配置读取，确保与 VectorStore 一致
+        self.max_seq_length = 512
+        self._load_model()
     
-    async def get_embedding(self, text: str) -> List[float]:
-        """
-        获取文本的向量表示
+    def _load_model(self):
+        """懒加载模型"""
+        if BGEEmbeddingProvider._model is not None:
+            return
         
-        注意：这是模拟实现，实际使用时需要接入OpenAI或其他嵌入模型
+        try:
+            from sentence_transformers import SentenceTransformer
+            
+            # 检查本地缓存目录
+            cache_dir = os.path.join(os.getcwd(), "models", "embeddings")
+            os.makedirs(cache_dir, exist_ok=True)
+            
+            logger.info(f"[BGEEmbedding] 正在加载模型: {self.model_name}")
+            
+            # 加载模型，使用本地缓存
+            BGEEmbeddingProvider._model = SentenceTransformer(
+                self.model_name,
+                cache_folder=cache_dir,
+                device="cpu"  # 可以根据环境切换到cuda
+            )
+            
+            logger.info(f"[BGEEmbedding] 模型加载完成，维度: {self.vector_dim}")
+            
+        except ImportError:
+            logger.error("[BGEEmbedding] sentence-transformers未安装，使用mock向量")
+            BGEEmbeddingProvider._model = None
+        except Exception as e:
+            logger.error(f"[BGEEmbedding] 模型加载失败: {e}")
+            BGEEmbeddingProvider._model = None
+    
+    def encode(self, text: str) -> List[float]:
+        """
+        将文本编码为向量
         
         Args:
             text: 输入文本
             
         Returns:
+            1024维向量
+        """
+        if BGEEmbeddingProvider._model is None:
+            return self._mock_encode(text)
+        
+        try:
+            # BGE模型需要在文本前添加指令前缀以获得最佳效果
+            instruction = "为这个句子生成表示以用于检索相关文章："
+            formatted_text = f"{instruction}{text}"
+            
+            # 编码
+            embedding = BGEEmbeddingProvider._model.encode(
+                formatted_text,
+                normalize_embeddings=True,  # 归一化向量
+                show_progress_bar=False
+            )
+            
+            return embedding.tolist()
+            
+        except Exception as e:
+            logger.error(f"[BGEEmbedding] 编码失败: {e}")
+            return self._mock_encode(text)
+    
+    def encode_batch(self, texts: List[str], batch_size: int = 32) -> List[List[float]]:
+        """
+        批量编码文本
+        
+        Args:
+            texts: 文本列表
+            batch_size: 批处理大小
+            
+        Returns:
             向量列表
         """
-        if self._mock_vectors:
-            # 模拟向量：使用文本哈希生成伪随机但一致的向量
-            # 实际使用时替换为真实嵌入模型调用
-            hash_val = hashlib.md5(text.encode()).hexdigest()
-            vector = []
-            for i in range(1536):
-                # 使用哈希值生成-1到1之间的伪随机数
-                idx = (i * 2) % 32
-                val = int(hash_val[idx:idx+2], 16) / 128 - 1
-                vector.append(val)
-            return vector
+        if BGEEmbeddingProvider._model is None:
+            return [self._mock_encode(text) for text in texts]
         
-        # TODO: 接入真实嵌入模型
-        # from langchain_openai import OpenAIEmbeddings
-        # embeddings = OpenAIEmbeddings()
-        # return await embeddings.aembed_query(text)
-        return []
+        try:
+            instruction = "为这个句子生成表示以用于检索相关文章："
+            formatted_texts = [f"{instruction}{text}" for text in texts]
+            
+            embeddings = BGEEmbeddingProvider._model.encode(
+                formatted_texts,
+                batch_size=batch_size,
+                normalize_embeddings=True,
+                show_progress_bar=False
+            )
+            
+            return embeddings.tolist()
+            
+        except Exception as e:
+            logger.error(f"[BGEEmbedding] 批量编码失败: {e}")
+            return [self._mock_encode(text) for text in texts]
+    
+    def _mock_encode(self, text: str) -> List[float]:
+        """
+        模拟编码（fallback）
+        使用文本哈希生成伪随机但一致的向量
+        """
+        hash_val = hashlib.md5(text.encode()).hexdigest()
+        vector = []
+        for i in range(self.vector_dim):
+            idx = (i * 2) % 32
+            val = int(hash_val[idx:idx+2], 16) / 128 - 1
+            vector.append(val)
+        return vector
+    
+    def get_model_info(self) -> Dict[str, Any]:
+        """获取模型信息"""
+        return {
+            "model_name": self.model_name,
+            "vector_dim": self.vector_dim,
+            "max_seq_length": self.max_seq_length,
+            "loaded": BGEEmbeddingProvider._model is not None
+        }
+
+
+class EmbeddingService:
+    """文本嵌入服务 - 统一接口"""
+    
+    def __init__(self, use_bge: bool = True):
+        self.provider = BGEEmbeddingProvider() if use_bge else None
+        self._mock_mode = self.provider is None or self.provider._model is None
+        
+        if self._mock_mode:
+            logger.warning("[EmbeddingService] 使用mock向量模式")
+        else:
+            logger.info("[EmbeddingService] 使用BGE-large-zh嵌入模型")
+    
+    async def get_embedding(self, text: str) -> List[float]:
+        """
+        获取文本的向量表示
+        
+        Args:
+            text: 输入文本
+            
+        Returns:
+            向量列表 (1024维 for BGE-large-zh)
+        """
+        if not text or not text.strip():
+            # 返回零向量
+            dim = settings.VECTOR_DIM
+            return [0.0] * dim
+        
+        try:
+            # 截断过长文本
+            text = text[:2000]  # 粗略字符限制
+            
+            if self.provider:
+                return self.provider.encode(text)
+            else:
+                return self._mock_embedding(text)
+                
+        except Exception as e:
+            logger.error(f"[EmbeddingService] 获取嵌入失败: {e}")
+            return self._mock_embedding(text)
     
     async def get_embeddings(self, texts: List[str]) -> List[List[float]]:
-        """批量获取文本向量"""
-        return [await self.get_embedding(text) for text in texts]
+        """
+        批量获取文本向量
+        
+        Args:
+            texts: 文本列表
+            
+        Returns:
+            向量列表
+        """
+        if not texts:
+            return []
+        
+        try:
+            if self.provider:
+                return self.provider.encode_batch(texts)
+            else:
+                return [self._mock_embedding(text) for text in texts]
+        except Exception as e:
+            logger.error(f"[EmbeddingService] 批量获取嵌入失败: {e}")
+            return [self._mock_embedding(text) for text in texts]
+    
+    def _mock_embedding(self, text: str) -> List[float]:
+        """模拟向量生成（fallback），维度与配置一致"""
+        dim = settings.VECTOR_DIM
+        hash_val = hashlib.md5(text.encode()).hexdigest()
+        vector = []
+        for i in range(dim):
+            idx = (i * 2) % 32
+            val = int(hash_val[idx:idx+2], 16) / 128 - 1
+            vector.append(val)
+        return vector
     
     async def store_memory(
         self,
@@ -71,10 +246,8 @@ class EmbeddingService:
             是否成功
         """
         try:
-            # 获取向量
             vector = await self.get_embedding(content)
             
-            # 构建payload
             payload = {
                 "novel_id": novel_id,
                 "node_id": node_id,
@@ -83,17 +256,16 @@ class EmbeddingService:
                 **(metadata or {})
             }
             
-            # 存储到向量数据库
             doc_id = f"{novel_id}_{node_id}"
             success = await vector_store.add_document(doc_id, vector, payload)
             
             if success:
-                logger.info(f"记忆节点已存储到向量库: {node_id}")
+                logger.debug(f"[EmbeddingService] 记忆节点已存储: {node_id}")
             
             return success
             
         except Exception as e:
-            logger.error(f"存储记忆节点失败: {e}")
+            logger.error(f"[EmbeddingService] 存储记忆失败: {e}")
             return False
     
     async def search_memories(
@@ -118,22 +290,18 @@ class EmbeddingService:
             相关记忆列表
         """
         try:
-            # 获取查询向量
             query_vector = await self.get_embedding(query)
             
-            # 构建过滤条件
             filters = {"novel_id": novel_id}
             if node_type:
                 filters["node_type"] = node_type
             
-            # 执行搜索
             results = await vector_store.search(
                 query_vector=query_vector,
                 top_k=top_k,
                 filters=filters
             )
             
-            # 过滤低分结果
             filtered_results = [
                 {
                     "id": r.id,
@@ -144,12 +312,12 @@ class EmbeddingService:
                 if r.score >= min_score
             ]
             
-            logger.info(f"记忆搜索完成: 查询'{query[:30]}...', 找到{len(filtered_results)}条结果")
+            logger.debug(f"[EmbeddingService] 记忆搜索完成: '{query[:30]}...', 找到{len(filtered_results)}条结果")
             
             return filtered_results
             
         except Exception as e:
-            logger.error(f"记忆搜索失败: {e}")
+            logger.error(f"[EmbeddingService] 记忆搜索失败: {e}")
             return []
     
     async def search_similar_memories(
@@ -173,7 +341,6 @@ class EmbeddingService:
         """
         results = await self.search_memories(novel_id, content, top_k=top_k + 1)
         
-        # 排除指定ID
         if exclude_id:
             results = [r for r in results if r.get("node_id") != exclude_id]
         
@@ -192,10 +359,10 @@ class EmbeddingService:
         try:
             success = await vector_store.delete_by_filter({"novel_id": novel_id})
             if success:
-                logger.info(f"已删除小说{novel_id}的所有向量记忆")
+                logger.info(f"[EmbeddingService] 已删除小说{novel_id}的所有向量记忆")
             return success
         except Exception as e:
-            logger.error(f"删除小说记忆失败: {e}")
+            logger.error(f"[EmbeddingService] 删除小说记忆失败: {e}")
             return False
     
     async def get_memory_stats(self, novel_id: int) -> Dict[str, Any]:
@@ -211,7 +378,6 @@ class EmbeddingService:
         try:
             total_count = await vector_store.count_documents({"novel_id": novel_id})
             
-            # 按类型统计
             type_counts = {}
             for node_type in ["plot_point", "character_moment", "world_building", "mystery", "conflict", "relationship"]:
                 count = await vector_store.count_documents({
@@ -224,13 +390,34 @@ class EmbeddingService:
             return {
                 "novel_id": novel_id,
                 "total_memories": total_count,
-                "type_distribution": type_counts
+                "type_distribution": type_counts,
+                "embedding_model": self.get_model_info()
             }
             
         except Exception as e:
-            logger.error(f"获取记忆统计失败: {e}")
+            logger.error(f"[EmbeddingService] 获取记忆统计失败: {e}")
             return {"novel_id": novel_id, "total_memories": 0, "type_distribution": {}}
+    
+    def get_model_info(self) -> Dict[str, Any]:
+        """获取当前使用的模型信息"""
+        if self.provider:
+            return self.provider.get_model_info()
+        return {"model_name": "mock", "vector_dim": settings.VECTOR_DIM, "loaded": False}
 
 
 # 全局嵌入服务实例
-embedding_service = EmbeddingService()
+_embedding_service: Optional[EmbeddingService] = None
+
+
+def get_embedding_service() -> EmbeddingService:
+    """获取全局嵌入服务实例"""
+    global _embedding_service
+    if _embedding_service is None:
+        _embedding_service = EmbeddingService(use_bge=True)
+    return _embedding_service
+
+
+def reset_embedding_service():
+    """重置嵌入服务实例（用于测试）"""
+    global _embedding_service
+    _embedding_service = None

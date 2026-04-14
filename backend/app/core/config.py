@@ -48,6 +48,10 @@ class Settings(BaseSettings):
     QDRANT_COLLECTION: str = Field(default="novel_memories", description="Qdrant集合名")
     QDRANT_API_KEY: Optional[str] = Field(default=None, description="Qdrant API密钥")
     
+    # Embedding向量维度配置（需与embedding模型输出维度一致）
+    # BGE-large-zh-v1.5 = 1024, OpenAI text-embedding-ada-002 = 1536, OpenAI text-embedding-3-small = 1536
+    VECTOR_DIM: int = Field(default=1024, description="Embedding向量维度")
+    
     # OpenAI API配置
     OPENAI_API_KEY: str = Field(default="", description="OpenAI API密钥")
     OPENAI_BASE_URL: str = Field(default="https://api.openai.com/v1", description="OpenAI基础URL")
@@ -69,6 +73,11 @@ class Settings(BaseSettings):
     LOCAL_LLAMA_MAX_TOKENS: int = Field(default=2048, description="本地模型最大token数")
     LOCAL_LLAMA_CONTEXT_WINDOW: int = Field(default=4096, description="本地模型上下文窗口大小")
     OLLAMA_BASE_URL: str = Field(default="http://localhost:11434", description="Ollama服务地址（如果有）")
+    
+    # 本地Qwen模型配置（Agentic RL主要使用）
+    LOCAL_QWEN_MODEL_PATH: str = Field(default="models/Qwen3.5-2B-Q4_K_M.gguf", description="Qwen GGUF模型路径")
+    LOCAL_QWEN_CONTEXT_SIZE: int = Field(default=4096, description="Qwen模型上下文长度")
+    LOCAL_QWEN_GPU_LAYERS: int = Field(default=0, description="Qwen模型GPU层数（0表示纯CPU）")
     
     # 小说生成配置
     MAX_CHAPTERS: int = Field(default=1000, description="最大章节数")

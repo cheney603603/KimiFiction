@@ -141,7 +141,8 @@ def mock_embedding_service():
     """模拟嵌入服务"""
     from unittest.mock import AsyncMock, MagicMock
     service = MagicMock()
-    service.get_embedding = AsyncMock(return_value=[0.1] * 1536)
+    # 使用与配置一致的向量维度（BGE-large-zh = 1024）
+    service.get_embedding = AsyncMock(return_value=[0.1] * 1024)
     return service
 
 

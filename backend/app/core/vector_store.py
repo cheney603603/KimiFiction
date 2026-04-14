@@ -32,7 +32,7 @@ class VectorStore:
     """向量存储管理器"""
     
     COLLECTION_NAME = settings.QDRANT_COLLECTION
-    VECTOR_SIZE = 1536  # OpenAI text-embedding-ada-002 的维度
+    VECTOR_SIZE = settings.VECTOR_DIM  # 与embedding模型输出维度一致，通过配置统一管理
     
     def __init__(self):
         self.client: Optional[QdrantClient] = None
@@ -46,7 +46,10 @@ class VectorStore:
                     api_key=settings.QDRANT_API_KEY,
                 )
                 self._ensure_collection()
-                logger.info(f"向量存储已连接: {settings.QDRANT_HOST}:{settings.QDRANT_PORT}")
+                logger.info(
+                    f"向量存储已连接: {settings.QDRANT_HOST}:{settings.QDRANT_PORT} "
+                    f"(向量维度: {self.VECTOR_SIZE})"
+                )
             except Exception as e:
                 logger.error(f"连接Qdrant失败: {e}，将使用模拟模式")
                 self._mock_mode = True
@@ -55,7 +58,7 @@ class VectorStore:
             logger.info("向量存储运行在模拟模式")
     
     def _ensure_collection(self):
-        """确保集合存在"""
+        """确保集合存在，并校验向量维度一致性"""
         if self._mock_mode:
             return
         
@@ -71,9 +74,21 @@ class VectorStore:
                         distance=Distance.COSINE
                     )
                 )
-                logger.info(f"创建向量集合: {self.COLLECTION_NAME}")
+                logger.info(
+                    f"创建向量集合: {self.COLLECTION_NAME} (维度: {self.VECTOR_SIZE})"
+                )
+            else:
+                # 已存在的集合：校验维度是否匹配
+                existing = self.client.get_collection(self.COLLECTION_NAME)
+                existing_dim = existing.config.params.vectors.size
+                if existing_dim != self.VECTOR_SIZE:
+                    logger.error(
+                        f"向量维度不匹配! 集合 '{self.COLLECTION_NAME}' "
+                        f"维度={existing_dim}, 配置 VECTOR_DIM={self.VECTOR_SIZE}。"
+                        f"请删除旧集合并重建，或修改 .env 中 VECTOR_DIM={existing_dim}"
+                    )
         except Exception as e:
-            logger.error(f"创建集合失败: {e}")
+            logger.error(f"创建/校验集合失败: {e}")
             raise
     
     async def add_document(
@@ -96,6 +111,16 @@ class VectorStore:
         if self._mock_mode:
             logger.debug(f"模拟模式: 添加文档 {doc_id}")
             return True
+        
+        # 写入前校验向量维度
+        actual_dim = len(vector)
+        if actual_dim != self.VECTOR_SIZE:
+            logger.error(
+                f"向量维度不匹配! doc_id={doc_id} "
+                f"向量维度={actual_dim}, 集合配置维度={self.VECTOR_SIZE}。"
+                f"请检查 embedding 模型输出维度与 VECTOR_DIM 配置是否一致。"
+            )
+            return False
         
         try:
             self.client.upsert(
