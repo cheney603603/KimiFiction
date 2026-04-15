@@ -1,11 +1,11 @@
 """
-完整训练Pipeline
+完整训练Pipeline (V3: LLM-as-Judge 集成版)
 
 流程:
 1. 模仿学习数据生成 (Imitation Learning)
 2. LoRA微调 (Supervised Fine-tuning)
-3. GRPO强化学习 (RL Fine-tuning)
-4. 效果评估对比
+3. GRPO强化学习 (RL Fine-tuning, V3: LLM-Judge reward)
+4. 效果评估对比 (V3: LLM-Judge 真实对比 + 成对比较)
 
 每个阶段都会保存结果和评估报告
 """
@@ -551,11 +551,12 @@ class TrainingPipeline:
         num_iterations: int = 10
     ) -> TrainingStageResult:
         """
-        Stage 3: GRPO强化学习
+        Stage 3: GRPO强化学习 (V3: 集成 LLM-as-Judge)
         
-        使用Writer-Reader对抗进一步优化策略
+        使用Writer-Reader对抗进一步优化策略。
+        V3: 训练循环中的 reward 从固定动作映射 → 真实 LLM Judge 评分
         """
-        stage_name = "GRPO强化学习"
+        stage_name = "GRPO强化学习 (V3)"
         start_time = datetime.now()
         
         logger.info(f"[Stage 3] {stage_name} - 开始")
@@ -567,11 +568,28 @@ class TrainingPipeline:
                 num_iterations=num_iterations,
             )
             
-            # ── V2: 真实 GRPO 训练循环 ──
-            # 创建训练器
+            # ── V3: 初始化 LLM Judge ──
+            from app.training.llm_judge import LLMJudge
+            llm_judge = None
+            reader_agent_for_grpo = None
+            
+            try:
+                reader_agent_for_grpo = ReaderAgent()
+                llm_judge = LLMJudge(
+                    llm_client=reader_agent_for_grpo,
+                    judge_level="quick",   # 训练循环内用快速模式降低延迟
+                    temperature=0.2,
+                )
+                logger.info("[Stage 3] LLM-Judge 已初始化 (quick模式，用于GRPO reward)")
+            except Exception as e:
+                logger.warning(f"[Stage 3] LLM-Judge 初始化失败 ({e})，使用规则降级模式")
+            
+            # ── V2+V3: 创建训练器（传入 LLM Judge）──
             trainer = GRPOTrainer(
                 novel_id=self.novel_id,
                 config=config,
+                llm_judge=llm_judge,           # V3: LLM Judge
+                reader_agent=reader_agent_for_grpo,  # 兼容
             )
             
             # 加载模仿学习数据作为训练上下文
@@ -721,6 +739,7 @@ class TrainingPipeline:
                         training_history[-1]["avg_reward"] - training_history[0]["avg_reward"]
                         if len(training_history) > 1 else 0
                     ),
+                    "reward_mode": "llm_judge" if llm_judge else "rule_based",
                 },
                 output_files=[
                     str(self.grpo_dir / "training_result.json"),
@@ -748,15 +767,22 @@ class TrainingPipeline:
         test_prompts: Optional[List[str]] = None
     ) -> TrainingStageResult:
         """
-        Stage 4: 评估对比
-        
-        对比各阶段的输出效果
+        Stage 4: 评估对比 (V3: LLM-as-Judge 真实对比)
+
+        使用 LLM Judge 进行跨阶段的成对比较和排名，
+        替代原有的硬编码假数据评分。
+
+        流程:
+        1. 对每个测试 prompt，生成/获取各阶段输出
+        2. 用 LLMJudge 批量评估所有输出
+        3. 成对比较相邻阶段（baseline vs imitation, imitation vs lora, ...）
+        4. 生成带证据的对比报告
         """
-        stage_name = "评估对比"
+        stage_name = "评估对比 (V3: LLM-Judge)"
         start_time = datetime.now()
-        
+
         logger.info(f"[Stage 4] {stage_name} - 开始")
-        
+
         try:
             # 默认测试提示
             if test_prompts is None:
@@ -765,71 +791,125 @@ class TrainingPipeline:
                     "描写主角与反派的第一次对决",
                     "写一段关于主角内心挣扎的独白",
                 ]
-            
-            # 模拟各阶段输出对比
+
+            # ── V3: 导入并初始化 LLM Judge ──
+            from app.training.llm_judge import LLMJudge, quick_evaluate_texts
+
+            reader_agent_for_judge = None
+            try:
+                reader_agent_for_judge = ReaderAgent()
+                logger.info("[Stage 4] LLMJudge 初始化成功 (使用 ReaderAgent)")
+            except Exception as e:
+                logger.warning(f"[Stage 4] ReaderAgent 创建失败 ({e})，LLM Judge 将在降级模式运行")
+
+            judge = LLMJudge(
+                llm_client=reader_agent_for_judge,
+                judge_level="standard",   # 完整 CoT 评估
+                temperature=0.3,
+            )
+
             comparison_results = {
                 "test_prompts": test_prompts,
                 "comparisons": [],
+                "judge_mode": "llm_as_judge" if reader_agent_for_judge else "fallback",
+                "evaluation_timestamp": datetime.now().isoformat(),
             }
-            
-            for prompt in test_prompts:
-                # 模拟不同阶段的输出
-                baseline_output = self._generate_baseline_output(prompt)
-                imitation_output = self._generate_imitation_output(prompt)
-                lora_output = self._generate_lora_output(prompt)
-                grpo_output = self._generate_grpo_output(prompt)
-                
+
+            for prompt_idx, prompt in enumerate(test_prompts):
+                logger.info(f"[Stage 4] 评估测试用例 {prompt_idx + 1}/{len(test_prompts)}: {prompt[:40]}...")
+
+                # 获取各阶段输出（真实或模拟）
+                baseline_text = self._generate_baseline_output(prompt)
+                imitation_text = self._generate_imitation_output(prompt)
+                lora_text = self._generate_lora_output(prompt)
+                grpo_text = self._generate_grpo_output(prompt)
+
+                outputs_map = {
+                    "baseline": baseline_text,
+                    "imitation": imitation_text,
+                    "lora_finetuned": lora_text,
+                    "grpo_optimized": grpo_text,
+                }
+
+                # V3: 真实 LLM Judge 批量评估
+                labels = list(outputs_map.keys())
+                texts = [outputs_map[k] for k in labels]
+
+                eval_report = await quick_evaluate_texts(
+                    texts=texts,
+                    labels=labels,
+                    reader_agent=reader_agent_for_judge,
+                )
+
+                # V3: 成对比较
+                pair_comparisons = {}
+                pairs = [
+                    ("baseline", "imitation"),
+                    ("imitation", "lora_finetuned"),
+                    ("lora_finetuned", "grpo_optimized"),
+                    ("baseline", "grpo_optimized"),
+                ]
+                for a_label, b_label in pairs:
+                    comp = await judge.compare(
+                        text_a=outputs_map[a_label],
+                        text_b=outputs_map[b_label],
+                        criteria="overall_quality",
+                        shared_context={"prompt": prompt},
+                    )
+                    pair_comparisons[f"{a_label}_vs_{b_label}"] = {
+                        "winner": comp.winner,
+                        "confidence": round(comp.confidence, 3),
+                        "reason": comp.reason[:200],
+                    }
+
                 comparison = {
                     "prompt": prompt,
-                    "outputs": {
-                        "baseline": {
-                            "text": baseline_output[:300] + "...",
-                            "score": 0.6,
-                            "characteristics": "基础模型输出，通用但缺乏风格",
-                        },
-                        "imitation": {
-                            "text": imitation_output[:300] + "...",
-                            "score": 0.7,
-                            "characteristics": "学习了参考小说的风格特征",
-                        },
-                        "lora_finetuned": {
-                            "text": lora_output[:300] + "...",
-                            "score": 0.78,
-                            "characteristics": "风格更加一致，符合小说类型",
-                        },
-                        "grpo_optimized": {
-                            "text": grpo_output[:300] + "...",
-                            "score": 0.85,
-                            "characteristics": "情节吸引力强，读者评分高",
-                        },
-                    },
-                    "improvement": {
-                        "lora_vs_baseline": 0.18,
-                        "grpo_vs_lora": 0.07,
-                        "grpo_vs_baseline": 0.25,
-                    }
+                    "prompt_index": prompt_idx,
+                    "outputs": {k: v[:300] + "..." for k, v in outputs_map.items()},
+                    "llm_judge_rankings": eval_report.get("rankings", []),
+                    "llm_judge_details": eval_report.get("details", []),
+                    "pairwise_comparisons": pair_comparisons,
+                    "best_model": eval_report.get("best"),
+                    "worst_model": eval_report.get("worst"),
                 }
-                
+
                 comparison_results["comparisons"].append(comparison)
-            
-            # 保存对比结果
+
+                logger.info(f"[Stage 4] 用例{prompt_idx+1} 最佳模型: {eval_report.get('best', '?')}")
+
+            # ── 保存原始结果 ──
             with open(self.evaluation_dir / "comparison_results.json", 'w', encoding='utf-8') as f:
                 json.dump(comparison_results, f, ensure_ascii=False, indent=2)
-            
-            # 生成对比报告
-            report = self._generate_comparison_report(comparison_results)
+
+            # ── 生成增强版对比报告（Markdown）──
+            report = self._generate_v3_comparison_report(comparison_results)
             with open(self.evaluation_dir / "comparison_report.md", 'w', encoding='utf-8') as f:
                 f.write(report)
-            
-            # 计算总体指标
-            all_improvements = [
-                c["improvement"]["grpo_vs_baseline"]
-                for c in comparison_results["comparisons"]
-            ]
-            avg_improvement = sum(all_improvements) / len(all_improvements)
-            
+
+            # 计算总体指标（基于真实评估）
+            all_scores = []
+            for comp in comparison_results["comparisons"]:
+                for ranking in comp.get("llm_judge_rankings", []):
+                    all_scores.append(ranking.get("score", 0))
+
+            # 计算各阶段平均分
+            stage_avgs = {"baseline": [], "imitation": [], "lora_finetuned": [], "grpo_optimized": []}
+            for comp in comparison_results["comparisons"]:
+                for detail in comp.get("llm_judge_details", []):
+                    label = detail.get("label", "")
+                    score = detail.get("overall_score", 0)
+                    if label in stage_avgs:
+                        stage_avgs[label].append(score)
+
+            final_stage_avgs = {k: round(sum(v)/len(v), 3) if v else 0 for k, v in stage_avgs.items()}
+
+            # GRPO vs Baseline 提升幅度
+            grpo_avg = final_stage_avgs.get("grpo_optimized", 0)
+            baseline_avg = final_stage_avgs.get("baseline", 0.5)
+            improvement = grpo_avg - baseline_avg if baseline_avg > 0 else 0
+
             end_time = datetime.now()
-            
+
             result = TrainingStageResult(
                 stage_name=stage_name,
                 status="success",
@@ -837,26 +917,37 @@ class TrainingPipeline:
                 end_time=end_time,
                 metrics={
                     "num_test_cases": len(test_prompts),
-                    "avg_improvement_grpo_vs_baseline": avg_improvement,
-                    "baseline_avg_score": 0.6,
-                    "final_avg_score": 0.85,
+                    "judge_mode": "llm_as_judge" if reader_agent_for_judge else "fallback",
+                    "avg_scores_by_stage": final_stage_avgs,
+                    "improvement_grpo_vs_baseline": round(improvement, 4),
+                    "pairwise_wins": self._count_pairwise_wins(comparison_results),
                 },
                 output_files=[
                     str(self.evaluation_dir / "comparison_results.json"),
                     str(self.evaluation_dir / "comparison_report.md"),
                 ],
-                sample_outputs=comparison_results["comparisons"][:2],
+                sample_outputs=[{
+                    "stage": "v3_llm_judge_evaluation",
+                    "description": f"LLM-Judge 真实评估完成: {len(test_prompts)} 测试用例 × 4 模型",
+                    "stage_averages": final_stage_avgs,
+                    "overall_improvement": f"{improvement:+.2%}" if improvement else "N/A",
+                }],
             )
-            
-            # 保存到Pipeline结果
+
             self.result.comparison_results = comparison_results
-            
-            logger.info(f"[Stage 4] {stage_name} - 完成: 平均提升{avg_improvement:.2%}")
-            
+
+            logger.info(f"[Stage 4] {stage_name} - 完成: "
+                       f"Baseline={baseline_avg:.3f}, GRPO={grpo_avg:.3f}, "
+                       f"提升={improvement:+.3f} ({improvement:+.1%})")
+
             return result
-            
+
         except Exception as e:
             logger.error(f"[Stage 4] {stage_name} - 失败: {e}")
+            import traceback
+            logger.error(traceback.format_exc())
+
+            # V3: 即使失败也尝试降级到基础版报告
             return TrainingStageResult(
                 stage_name=stage_name,
                 status="failed",
@@ -951,7 +1042,168 @@ class TrainingPipeline:
         ])
         
         return "\n".join(lines)
-    
+
+    def _generate_v3_comparison_report(self, comparison_results: Dict[str, Any]) -> str:
+        """
+        V3: 生成 LLM-Judge 驱动的增强对比报告
+
+        包含:
+        - 各模型排名（基于真实 LLM 评分）
+        - 成对比较结果（A vs B 胜者 + 置信度）
+        - 逐用例详细分析
+        - 改进建议
+        """
+        judge_mode = comparison_results.get("judge_mode", "unknown")
+        ts = comparison_results.get("evaluation_timestamp", "")
+
+        lines = [
+            "# 训练效果评估报告 (V3: LLM-as-Judge)",
+            "",
+            f"**生成时间**: {ts}",
+            f"**Pipeline ID**: {self.result.pipeline_id}",
+            f"**评估模式**: {judge_mode}",
+            "",
+            "---",
+            "",
+            "## 总览",
+            "",
+        ]
+
+        # 汇总各阶段平均分
+        stage_scores = {"baseline": [], "imitation": [], "lora_finetuned": [], "grpo_optimized": []}
+        for comp in comparison_results["comparisons"]:
+            for detail in comp.get("llm_judge_details", []):
+                label = detail.get("label", "")
+                score = detail.get("overall_score", 0)
+                if label in stage_scores:
+                    stage_scores[label].append(score)
+
+        stage_avgs = {
+            k: (round(sum(v)/len(v), 3) if v else 0)
+            for k, v in stage_scores.items()
+        }
+
+        # 排名
+        ranked = sorted(stage_avgs.items(), key=lambda x: x[1], reverse=True)
+
+        lines.append("| 排名 | 阶段 | 平均分 |")
+        lines.append("|------|------|--------|")
+        for rank, (label, avg) in enumerate(ranked, 1):
+            label_names = {
+                "baseline": "基线模型",
+                "imitation": "模仿学习",
+                "lora_finetuned": "LoRA微调",
+                "grpo_optimized": "GRPO优化",
+            }
+            lines.append(f"| {rank} | {label_names.get(label, label)} | {avg:.3f} |")
+
+        # 计算提升幅度
+        grpo_s = stage_avgs.get("grpo_optimized", 0)
+        base_s = stage_avgs.get("baseline", 0.5)
+        improvement = grpo_s - base_s if base_s > 0 else 0
+
+        lines.extend([
+            "",
+            f"**GRPO 相对 Baseline 提升**: **{improvement:+.3f}** ({improvement:+.1%})",
+            "",
+            "---",
+            "",
+            "## 成对比较结果",
+            "",
+            "| 比较 | 胜者 | 置信度 | 判决理由摘要 |",
+            "|------|------|--------|-------------|",
+        ])
+
+        # 统计成对比较胜者
+        for comp in comparison_results["comparisons"]:
+            for pair_key, pair_data in comp.get("pairwise_comparisons", {}).items():
+                winner = pair_data.get("winner", "?")
+                conf = pair_data.get("confidence", 0)
+                reason = pair_data.get("reason", "")[:60]
+                lines.append(f"| {pair_key} | {winner} | {conf:.2f} | {reason}... |")
+
+        # 详细用例
+        lines.extend([
+            "",
+            "---",
+            "",
+            "## 逐用例详细评估",
+            "",
+        ])
+
+        for i, comp in enumerate(comparison_results["comparisons"], 1):
+            prompt = comp.get("prompt", "")
+            best = comp.get("best_model", "?")
+
+            lines.extend([
+                f"### 测试用例 {i}: {prompt[:50]}...",
+                f"- **最佳输出**: `{best}`",
+                "",
+            ])
+
+            for detail in comp.get("llm_judge_details", []):
+                label = detail.get("label", "?")
+                score = detail.get("overall_score", 0)
+                top_dim = detail.get("top_dimension", "?")
+                bottom_dim = detail.get("bottom_dimension", "?")
+                strengths = detail.get("strengths", [])
+                weaknesses = detail.get("weaknesses", [])
+
+                lines.extend([
+                    f"#### {label} (总分: {score:.3f})",
+                    f"- **最强维度**: {top_dim}",
+                    f"- **最弱维度**: {bottom_dim}",
+                ])
+                if strengths:
+                    lines.append(f"- **优势**: {'; '.join(str(s) for s in strengths[:2])}")
+                if weaknesses:
+                    lines.append(f"- **劣势**: {'; '.join(str(w) for w in weaknesses[:2])}")
+                lines.append("")
+
+        # 结论
+        lines.extend([
+            "---",
+            "",
+            "## 结论与建议",
+            "",
+            f"经过 LLM-as-Judge 的真实评估（{len(comparison_results['comparisons'])} 个测试用例 × 4 个阶段）：",
+            "",
+        ])
+
+        if improvement > 0.05:
+            lines.append(f"✅ **训练流程有效**: GRPO优化后相比基线提升 **{improvement:+.1%}**，证明 Pipeline 的正向效果。")
+        elif improvement > 0:
+            lines.append(f"⚠️ **提升有限**: GRPO相比基线仅提升 {improvement:+.1%}，建议增加训练迭代或数据质量审查。")
+        else:
+            lines.append(f"❌ **未观察到提升** ({improvement:+.1%})，需要检查：")
+            lines.append("   - 训练数据质量是否达标")
+            lines.append("   - GRPO reward function 是否准确反映质量")
+            lines.append("   - LoRA 微调是否有效收敛")
+
+        lines.extend([
+            "",
+            "### 下一步建议",
+            "",
+            "1. **扩大评估集**: 增加测试用例数量（建议 ≥10），提高统计显著性",
+            "2. **人工抽检**: 对 Judge 评分最高/最低的样本进行人工复核",
+            "3. **迭代优化**: 根据弱点维度针对性改进 Prompt 或数据分布",
+            "",
+            "---",
+            f"*报告由 KimiFiction TrainingPipeline V3 自动生成*",
+        ])
+
+        return "\n".join(lines)
+
+    @staticmethod
+    def _count_pairwise_wins(comparison_results: Dict[str, Any]) -> Dict[str, int]:
+        """统计成对比较中各模型的胜场数"""
+        wins = {}
+        for comp in comparison_results.get("comparisons", []):
+            for pair_key, pair_data in comp.get("pairwise_comparisons", {}).items():
+                winner = pair_data.get("winner", "tie")
+                wins[winner] = wins.get(winner, 0) + 1
+        return wins
+
     def _save_final_report(self):
         """保存最终报告"""
         report_path = self.output_dir / "FINAL_REPORT.json"
