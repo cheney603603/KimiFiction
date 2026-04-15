@@ -28,6 +28,7 @@ class LLMProvider(str, Enum):
     DEEPSEEK = "deepseek"
     YUANBAO = "yuanbao"
     LOCAL_LLAMA = "local_llama"  # 本地Llama（Ollama/LlamaIndex）
+    LOCAL_QWEN = "local_qwen"    # 本地Qwen（llama.cpp）
 
 
 class LLMService:
@@ -81,6 +82,8 @@ class LLMService:
             self._init_deepseek_client(config)
         elif self.provider == LLMProvider.LOCAL_LLAMA:
             self._init_local_llama_client(config)
+        elif self.provider == LLMProvider.LOCAL_QWEN:
+            self._init_local_qwen_client(config)
         else:
             # kimi/yuanbao 走chat2api
             self.openai_client = None
@@ -144,7 +147,18 @@ class LLMService:
         self.openai_client = None
         self.deepseek_client = None
         self.local_llama_client = "ollama"
+        self.local_qwen_client = None
         logger.info(f"LLMService初始化: Local Llama模式, ollama={self.ollama_base_url}, model_path={self.llama_model_path}")
+    
+    def _init_local_qwen_client(self, config: Dict[str, Any]):
+        """初始化本地Qwen客户端（llama.cpp）"""
+        from app.core.local_llm import get_local_llm_service
+        
+        self.openai_client = None
+        self.deepseek_client = None
+        self.local_llama_client = None
+        self.local_qwen_client = get_local_llm_service()
+        logger.info(f"LLMService初始化: Local Qwen模式, model_path={self.local_qwen_client.config.model_path}")
     
     async def chat(
         self,
@@ -159,6 +173,8 @@ class LLMService:
             return await self._chat_deepseek(messages, json_mode, **kwargs)
         elif self.provider == LLMProvider.LOCAL_LLAMA:
             return await self._chat_local_llama(messages, json_mode, **kwargs)
+        elif self.provider == LLMProvider.LOCAL_QWEN:
+            return await self._chat_local_qwen(messages, json_mode, **kwargs)
         else:
             return await self._chat_chat2api(messages, json_mode, **kwargs)
     
@@ -258,6 +274,38 @@ class LLMService:
             return response.content
         except Exception as e:
             logger.error(f"DeepSeek API调用失败: {e}")
+            raise
+    
+    async def _chat_local_qwen(
+        self,
+        messages: List[Dict[str, str]],
+        json_mode: bool = False,
+        **kwargs
+    ) -> str:
+        """使用本地Qwen模型（llama.cpp）"""
+        try:
+            if not self.local_qwen_client:
+                from app.core.local_llm import get_local_llm_service
+                self.local_qwen_client = get_local_llm_service()
+            
+            result = await self.local_qwen_client.chat(
+                messages=messages,
+                temperature=kwargs.get("temperature", self.temperature),
+                max_tokens=kwargs.get("max_tokens", self.max_tokens)
+            )
+            
+            # 如果要求JSON模式，尝试提取JSON
+            if json_mode and result:
+                from app.core.json_utils import extract_json_from_response
+                json_result, _ = extract_json_from_response(result)
+                if json_result:
+                    import json
+                    return json.dumps(json_result, ensure_ascii=False)
+            
+            return result
+            
+        except Exception as e:
+            logger.error(f"[LLM] 本地Qwen调用失败: {e}")
             raise
     
     async def _chat_local_llama(
@@ -435,6 +483,12 @@ class LLMService:
             except:
                 pass
             return {"available": False, "mode": "local_llama", "error": "Ollama未运行"}
+        elif self.provider == LLMProvider.LOCAL_QWEN:
+            try:
+                from app.core.local_llm import check_local_model
+                return await check_local_model()
+            except Exception as e:
+                return {"available": False, "mode": "local_qwen", "error": str(e)}
         else:
             try:
                 url = f"{self.chat2api_base_url}/api/status/{self.provider.value}"

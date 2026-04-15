@@ -1,5 +1,5 @@
 import { Link, useLocation, useNavigate, Outlet } from 'react-router-dom'
-import { BookOpen, Home, Settings, Moon, Sun, User, LogOut } from 'lucide-react'
+import { BookOpen, Home, Settings, Moon, Sun, User, LogOut, GitBranch, BarChart3 } from 'lucide-react'
 import { useState, useEffect } from 'react'
 
 interface LayoutProps {
@@ -48,6 +48,8 @@ export function Layout(_props: LayoutProps) {
 
   const navItems = [
     { path: '/', label: '工作台', icon: Home },
+    { path: '/workflow/graph', label: 'Agent协作', icon: GitBranch },
+    { path: '/training', label: 'RL训练', icon: BarChart3 },
     { path: '/settings/llm', label: 'API配置', icon: Settings },
   ]
 

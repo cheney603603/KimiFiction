@@ -25,9 +25,6 @@ langgraph==0.0.20
 httpx==0.26.0
 aiohttp==3.9.1
 
-# HTTP 客户端
-aiohttp==3.9.1
-
 # 工具库
 python-jose[cryptography]==3.3.0
 passlib[bcrypt]==1.7.4
@@ -36,6 +33,26 @@ python-dotenv==1.0.0
 
 # 日志和监控
 loguru==0.7.2
+
+# ===== Agentic RL 相关依赖 =====
+
+# 本地LLM推理 (用于Qwen3.5-2B)
+llama-cpp-python==0.2.56
+
+# Embedding模型 (BGE-large-zh)
+sentence-transformers==2.5.1
+transformers==4.37.2
+torch==2.2.0
+accelerate==0.27.0
+
+# LoRA微调
+peft==0.8.2
+bitsandbytes==0.42.0
+datasets==2.17.0
+
+# 数值计算
+numpy==1.26.4
+scipy==1.12.0
 
 # 测试
 pytest==7.4.4

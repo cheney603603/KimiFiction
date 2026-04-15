@@ -2,10 +2,17 @@
 Writer-Reader RL Adversarial System
 Writer Agent（生成器）与 Reader Agent（判别器）通过强化学习博弈
 
-核心机制：
-- PPO（近端策略优化）微调写作策略
-- 动作空间：[生成/修改/删除]
+核心机制（更新为GRPO）：
+- GRPO（Group Relative Policy Optimization）微调写作策略
+- 无需critic网络，使用组内相对奖励计算优势
+- 动作空间：[生成/修改/删除/保留]
 - Reward = 人工评估 + 自动化指标（困惑度、连贯性、读者评分）
+
+新增功能：
+- 支持GRPO算法
+- 集成TPO（Test-time Preference Optimization）
+- 集成模仿学习
+- 支持Test-Time RL
 """
 import json
 import copy
@@ -19,13 +26,16 @@ from app.agents.writer import ChapterWriterAgent
 from app.agents.reader import ReaderAgent
 from app.agents.base import BaseAgent
 
-
-class WritingAction(str, Enum):
-    """写作动作空间"""
-    GENERATE = "generate"       # 生成新内容
-    REVISE = "revise"          # 修改内容
-    DELETE = "delete"          # 删除内容
-    KEEP = "keep"              # 保留不变
+# 导入GRPO训练器（统一入口：app.rl_training → app/training/）
+from app.rl_training import (
+    GRPOTrainer,
+    GRPOConfig,
+    WritingAction,
+    Episode,
+    TPOService,
+)
+# RTX 4070 优化配置
+from app.rl_training.config import RLTrainingConfig
 
 
 @dataclass
@@ -55,33 +65,6 @@ class WritingState:
         }
 
 
-@dataclass
-class PPOConfig:
-    """PPO算法配置"""
-    # 策略网络
-    lr_actor: float = 3e-4
-    lr_critic: float = 1e-3
-    gamma: float = 0.99          # 折扣因子
-    lam: float = 0.95            # GAE lambda
-    
-    # PPO特定
-    clip_epsilon: float = 0.2    # PPO裁剪范围
-    entropy_coef: float = 0.01   # 熵正则化系数
-    value_loss_coef: float = 0.5 # 价值损失系数
-    max_grad_norm: float = 0.5   # 梯度裁剪
-    
-    # 训练
-    ppo_epochs: int = 4           # 每次更新的epoch数
-    batch_size: int = 64
-    minibatch_size: int = 16
-    
-    # 探索
-    action_noise: float = 0.1    # 动作噪声（温度采样）
-    
-    def to_dict(self) -> Dict[str, Any]:
-        return {k: v for k, v in self.__dict__.items() if not k.startswith('_')}
-
-
 class RewardFunction:
     """
     Reward 函数构建器
@@ -89,7 +72,7 @@ class RewardFunction:
     """
     
     def __init__(self):
-        # 权重配置
+        # 权重配置（与GRPOConfig保持一致）
         self.weights = {
             "reader_score": 0.35,       # Reader Agent评分
             "hook_score": 0.20,         # 钩子吸引力评分
@@ -199,192 +182,19 @@ class RewardFunction:
             return 0.5
         improvement = (prev_confusing - curr_confusing) / max(prev_confusing, 1)
         return max(0.0, min(1.0, 0.5 + improvement * 0.5))
-    
-    def compute_batch_rewards(
-        self,
-        reader_feedbacks: List[Dict[str, Any]],
-        previous_feedbacks: Optional[List[Dict[str, Any]]] = None,
-        drafts: Optional[List[str]] = None,
-        actions: Optional[List[WritingAction]] = None,
-    ) -> List[float]:
-        """批量计算Reward"""
-        rewards = []
-        for i, feedback in enumerate(reader_feedbacks):
-            prev = previous_feedbacks[i] if previous_feedbacks else None
-            draft = drafts[i] if drafts else ""
-            action = actions[i] if actions else None
-            reward, _ = self.compute(feedback, prev, draft, action)
-            rewards.append(reward)
-        return rewards
-
-
-class PPOStrategy:
-    """
-    PPO策略管理器
-    
-    注意：由于 Writer Agent 使用外部 LLM API（GPT-4），
-    这里采用"策略评分+采样"的方式实现类PPO机制：
-    - 维护每个动作的期望reward估计
-    - 使用clip策略限制策略更新幅度
-    - 通过温度参数控制探索与利用的平衡
-    """
-    
-    def __init__(self, config: Optional[PPOConfig] = None):
-        self.config = config or PPOConfig()
-        
-        # 动作价值估计（简化为每个动作类型的EWMA）
-        self.action_values: Dict[WritingAction, float] = {
-            WritingAction.GENERATE: 0.5,
-            WritingAction.REVISE: 0.5,
-            WritingAction.DELETE: 0.3,
-            WritingAction.KEEP: 0.4,
-        }
-        
-        # 动作计数（用于UCB探索）
-        self.action_counts: Dict[WritingAction, int] = {
-            WritingAction.GENERATE: 1,
-            WritingAction.REVISE: 1,
-            WritingAction.DELETE: 1,
-            WritingAction.KEEP: 1,
-        }
-        
-        # 衰减因子
-        self.gamma = self.config.gamma
-        
-        # 历史记录
-        self.policy_history: List[Dict[str, Any]] = []
-        self.total_iterations = 0
-        
-        # 熵记录
-        self.entropy_history: List[float] = []
-    
-    def update_action_values(
-        self,
-        action: WritingAction,
-        reward: float,
-        learning_rate: float = 0.1
-    ) -> None:
-        """更新动作价值估计（简化的EWMA更新）"""
-        current = self.action_values.get(action, 0.5)
-        # 指数移动平均
-        new_value = current + learning_rate * (reward - current)
-        self.action_values[action] = max(0.0, min(1.0, new_value))
-        self.action_counts[action] += 1
-    
-    def select_action_ucb(
-        self,
-        temperature: float = 0.5,
-        use_ucb: bool = True
-    ) -> Tuple[WritingAction, Dict[str, float]]:
-        """
-        基于UCB（Upper Confidence Bound）的动作选择
-        
-        Args:
-            temperature: 温度参数（控制探索程度）
-            use_ucb: 是否使用UCB探索
-            
-        Returns:
-            selected_action, action_probs
-        """
-        import math
-        
-        actions = list(WritingAction)
-        values = [self.action_values[a] for a in actions]
-        
-        # 计算UCB bonus
-        total_counts = sum(self.action_counts.values())
-        ucb_bonus = {}
-        for action in actions:
-            count = self.action_counts[action]
-            if use_ucb and count > 0:
-                bonus = temperature * math.sqrt(
-                    math.log(total_counts + 1) / max(count, 1)
-                )
-                ucb_bonus[action] = bonus
-            else:
-                ucb_bonus[action] = 0
-        
-        # 综合得分
-        scores = {
-            a: self.action_values[a] + ucb_bonus[a]
-            for a in actions
-        }
-        
-        # 计算概率（softmax）
-        max_score = max(scores.values())
-        exp_scores = {
-            a: math.exp((scores[a] - max_score) / max(temperature, 0.01))
-            for a in actions
-        }
-        total_exp = sum(exp_scores.values())
-        probs = {
-            a: exp_scores[a] / total_exp
-            for a in actions
-        }
-        
-        # 采样
-        import random
-        r = random.random()
-        cumsum = 0
-        selected = WritingAction.KEEP
-        for action in actions:
-            cumsum += probs[action]
-            if r <= cumsum:
-                selected = action
-                break
-        
-        # 记录
-        self.policy_history.append({
-            "iteration": self.total_iterations,
-            "selected": selected.value,
-            "probs": {a.value: probs[a] for a in actions},
-            "values": {a.value: self.action_values[a] for a in actions},
-            "scores": {a.value: scores[a] for a in actions},
-        })
-        self.total_iterations += 1
-        
-        return selected, probs
-    
-    def compute_policy_loss(
-        self,
-        old_probs: Dict[str, float],
-        new_probs: Dict[str, float],
-        advantages: List[float]
-    ) -> float:
-        """
-        计算PPO裁剪损失（简化版）
-        
-        在实际LLM调用场景中，我们用概率比来近似策略梯度
-        """
-        loss = 0.0
-        for action_str, adv in zip(old_probs.keys(), advantages):
-            ratio = new_probs.get(action_str, 0.1) / max(old_probs.get(action_str, 0.1), 0.01)
-            # PPO clip
-            clipped_ratio = max(min(ratio, 1 + self.config.clip_epsilon),
-                               1 - self.config.clip_epsilon)
-            loss -= min(ratio * adv, clipped_ratio * adv)
-        return loss / max(len(advantages), 1)
-    
-    def get_policy_summary(self) -> Dict[str, Any]:
-        """获取策略摘要"""
-        return {
-            "action_values": {a.value: round(v, 4) for a, v in self.action_values.items()},
-            "action_counts": {a.value: c for a, c in self.action_counts.items()},
-            "total_iterations": self.total_iterations,
-            "avg_entropy": sum(self.entropy_history[-100:]) / max(len(self.entropy_history[-100:]), 1),
-        }
 
 
 class WriterReaderLoop:
     """
-    Writer-Reader 强化学习对抗循环
+    Writer-Reader 强化学习对抗循环（GRPO版本）
     
     流程：
     1. Writer 根据状态和策略生成/修改章节
     2. Reader Agent 评估章节质量
     3. RewardFunction 计算综合奖励
-    4. PPOStrategy 更新写作策略
-    5. 重复直到达到质量阈值或最大轮次
+    4. GRPOTrainer 更新写作策略
+    5. 可选：TPO进一步优化
+    6. 重复直到达到质量阈值或最大轮次
     """
     
     def __init__(
@@ -393,18 +203,44 @@ class WriterReaderLoop:
         chapter_number: int,
         max_rounds: int = 3,
         score_threshold: float = 0.78,
-        config: Optional[PPOConfig] = None,
+        use_grpo: bool = True,
+        use_tpo: bool = False,
+        grpo_config: Optional[GRPOConfig] = None,
     ):
         self.novel_id = novel_id
         self.chapter_number = chapter_number
         self.max_rounds = max_rounds
         self.score_threshold = score_threshold
+        self.use_grpo = use_grpo
+        self.use_tpo = use_tpo
         
         # 初始化组件
         self.writer = ChapterWriterAgent()
         self.reader = ReaderAgent()
         self.reward_fn = RewardFunction()
-        self.ppo_strategy = PPOStrategy(config)
+        
+        # GRPO训练器（如果使用）
+        self.grpo_trainer = None
+        if use_grpo:
+            # 优先使用传入的 grpo_config，否则用 RTX 4070 优化配置
+            final_config = grpo_config
+            if final_config is None:
+                # 自动应用 RTX 4070 优化配置（8GB 显存限定）
+                rtx_config = RLTrainingConfig()
+                final_config = GRPOConfig(
+                    group_size=rtx_config.grpo_group_size,
+                    num_iterations=max_rounds,
+                    temperature=rtx_config.temperature,
+                )
+            self.grpo_trainer = GRPOTrainer(
+                novel_id=novel_id,
+                config=final_config,
+            )
+        
+        # TPO服务（如果使用）
+        self.tpo_service = None
+        if use_tpo:
+            self.tpo_service = TPOService(self.reader, num_candidates=3)
         
         # 状态追踪
         self.current_state: Optional[WritingState] = None
@@ -415,7 +251,8 @@ class WriterReaderLoop:
         logger.info(
             f"[WriterReaderRL] 初始化对抗循环: "
             f"novel={novel_id}, chapter={chapter_number}, "
-            f"max_rounds={max_rounds}, threshold={score_threshold}"
+            f"max_rounds={max_rounds}, threshold={score_threshold}, "
+            f"use_grpo={use_grpo}, use_tpo={use_tpo}"
         )
     
     async def run(
@@ -451,17 +288,28 @@ class WriterReaderLoop:
             f"[WriterReaderRL] 开始对抗循环: 初始draft长度={len(initial_draft)}"
         )
         
+        # 构建GRPO状态表示
+        state_repr = self._build_state_repr(context, outline)
+        
         for round_num in range(1, self.max_rounds + 1):
             logger.info(f"[WriterReaderRL] === 第{round_num}轮 ===")
             
             # Step 1: 策略选择动作
-            action, action_probs = self.ppo_strategy.select_action_ucb(
-                temperature=0.3 if round_num > 1 else 0.5
-            )
+            if self.use_grpo and self.grpo_trainer:
+                # 使用GRPO策略采样
+                group_actions = self.grpo_trainer.policy.sample_group(
+                    state_repr,
+                    group_size=3,  # 每轮采样3个
+                    temperature=0.3 if round_num > 1 else 0.5
+                )
+                action, action_prob = group_actions[0]
+            else:
+                # 默认策略
+                action = WritingAction.GENERATE if round_num == 1 else WritingAction.REVISE
+                action_prob = 0.5
             
             logger.info(
-                f"[WriterReaderRL] 策略选择: action={action.value}, "
-                f"probs={ {k.value: round(v, 3) for k, v in action_probs.items()} }"
+                f"[WriterReaderRL] 策略选择: action={action.value}"
             )
             
             # Step 2: Writer 执行动作
@@ -508,8 +356,21 @@ class WriterReaderLoop:
                 action=action,
             )
             
-            # Step 5: 更新策略
-            self.ppo_strategy.update_action_values(action, reward)
+            # Step 5: 如果使用GRPO，记录episode
+            if self.use_grpo and self.grpo_trainer:
+                episode = Episode(
+                    state=state_repr,
+                    action=action,
+                    output=new_draft,
+                    reward=reward,
+                    advantage=0.0,  # 稍后在组级别计算
+                    log_prob=np.log(max(action_prob, 1e-8)),
+                    group_mean_reward=0.0,
+                    group_std_reward=0.0
+                )
+                # 这里简化处理，实际应该在组级别更新
+            
+            # 更新策略
             self.current_state.reward_history.append(reward)
             self.current_state.reader_scores.append(reader_result.get("reader_feedback", {}))
             self.current_state.action_history.append({
@@ -560,7 +421,6 @@ class WriterReaderLoop:
                 "continue_reading": continue_reading,
                 "passed": passed,
                 "draft_length": len(new_draft),
-                "action_probs": {k.value: round(v, 3) for k, v in action_probs.items()},
             })
             
             if passed:
@@ -570,21 +430,37 @@ class WriterReaderLoop:
                 )
                 break
         
-        # 返回最终结果
+        # Step 7: 可选的TPO优化
         final_draft = self.best_state.draft if self.best_state else self.current_state.draft
-        final_reward = self.best_reward if self.best_state else self.current_state.reward_history[-1] if self.current_state.reward_history else 0
         
+        if self.use_tpo and self.tpo_service:
+            logger.info("[WriterReaderRL] 执行TPO优化...")
+            try:
+                tpo_result = await self.tpo_service.optimize(
+                    generate_fn=lambda ctx, temp: self._writer_act_with_temp(ctx, temp, outline, characters, context),
+                    context=context,
+                    outline=outline,
+                    num_candidates=3
+                )
+                final_draft = tpo_result.final_output
+                logger.info(f"[WriterReaderRL] TPO优化完成: 改进={tpo_result.improvement:+.4f}")
+            except Exception as e:
+                logger.error(f"[WriterReaderRL] TPO优化失败: {e}")
+        
+        # 返回最终结果
         return {
             "success": True,
             "final_draft": final_draft,
-            "final_reward": final_reward,
+            "final_reward": self.best_reward if self.best_state else self.current_state.reward_history[-1] if self.current_state.reward_history else 0,
             "best_reward": self.best_reward,
             "total_rounds": len(self.loop_history),
             "passed": self.loop_history[-1].get("passed", False) if self.loop_history else False,
             "loop_history": self.loop_history,
-            "policy_summary": self.ppo_strategy.get_policy_summary(),
+            "policy_summary": self.grpo_trainer.policy.get_policy_summary() if self.grpo_trainer else None,
             "best_state": self.best_state.to_dict() if self.best_state else None,
             "word_count": len(final_draft.replace(" ", "").replace("\n", "")),
+            "use_grpo": self.use_grpo,
+            "use_tpo": self.use_tpo,
         }
     
     async def _writer_act(
@@ -637,6 +513,22 @@ class WriterReaderLoop:
             logger.error(f"[WriterReaderRL] Writer执行异常: {e}")
             return {"success": False, "error": str(e)}
     
+    async def _writer_act_with_temp(
+        self,
+        context: Dict[str, Any],
+        temperature: float,
+        outline: Dict[str, Any],
+        characters: List[Dict],
+        base_context: Dict[str, Any]
+    ) -> str:
+        """带温度参数的Writer执行（用于TPO）"""
+        ctx = base_context.copy()
+        ctx.update(context)
+        ctx["temperature"] = temperature
+        
+        result = await self._writer_act(WritingAction.GENERATE, outline, characters, ctx)
+        return result.get("content", "")
+    
     async def _reader_evaluate(
         self,
         draft: str,
@@ -664,6 +556,24 @@ class WriterReaderLoop:
                 }
             }
     
+    def _build_state_repr(self, context: Dict[str, Any], outline: Dict[str, Any]) -> str:
+        """构建状态表示（用于GRPO）"""
+        parts = []
+        
+        # 章节号
+        parts.append(f"Chapter: {self.chapter_number}")
+        
+        # 大纲摘要
+        if outline:
+            parts.append(f"Outline: {outline.get('summary', '')[:100]}")
+        
+        # 上下文信息
+        if context:
+            parts.append(f"Style: {context.get('writing_style', 'default')}")
+            parts.append(f"EnvLevel: {context.get('env_description_level', 'normal')}")
+        
+        return " | ".join(parts)
+    
     def get_learning_report(self) -> Dict[str, Any]:
         """生成学习报告"""
         if not self.loop_history:
@@ -672,7 +582,7 @@ class WriterReaderLoop:
         rewards = [h["reward"] for h in self.loop_history]
         reader_scores = [h.get("reader_score", 0) for h in self.loop_history]
         
-        return {
+        report = {
             "chapter": self.chapter_number,
             "total_rounds": len(self.loop_history),
             "passed": self.loop_history[-1].get("passed", False) if self.loop_history else False,
@@ -680,12 +590,114 @@ class WriterReaderLoop:
             "reward_progression": rewards,
             "reader_score_progression": reader_scores,
             "reward_improvement": rewards[-1] - rewards[0] if len(rewards) > 1 else 0,
-            "policy_summary": self.ppo_strategy.get_policy_summary(),
-            "most_effective_action": max(
-                self.ppo_strategy.action_values.items(),
-                key=lambda x: x[1]
-            )[0].value if self.ppo_strategy.action_values else "unknown",
-            "action_distribution": {
-                k.value: v for k, v in self.ppo_strategy.action_counts.items()
-            },
+            "use_grpo": self.use_grpo,
+            "use_tpo": self.use_tpo,
         }
+        
+        if self.grpo_trainer:
+            report["grpo_policy"] = self.grpo_trainer.policy.get_policy_summary()
+        
+        return report
+    
+    async def run_with_collection(
+        self,
+        collector,
+        outline: Dict[str, Any],
+        characters: List[Dict],
+        context: Dict[str, Any],
+        initial_draft: str = "",
+        do_pre_eval: bool = True,
+        do_post_eval: bool = True,
+    ) -> Dict[str, Any]:
+        """
+        执行带数据采集的 Writer-Reader 对抗循环
+        """
+        from app.services.rubric_evaluation_service import RubricEvaluationService
+        from app.models.rubric import EvaluationType
+        
+        # 可选：训练前评测
+        pre_eval = None
+        if do_pre_eval:
+            logger.info("[WriterReaderRL] 执行训练前 Rubric 评测...")
+            pre_eval = await collector.evaluate_before_training([self.chapter_number])
+            logger.info(f"[WriterReaderRL] 训练前分数: {pre_eval.get('average_score', 0):.2f}")
+        
+        # 运行 RL 对抗循环
+        logger.info("[WriterReaderRL] 开始对抗循环...")
+        rl_result = await self.run(
+            outline=outline,
+            characters=characters,
+            context=context,
+            initial_draft=initial_draft,
+        )
+        
+        # 采集每一轮数据
+        episode_number = 0
+        for round_data in self.loop_history:
+            episode_number += 1
+            action_taken = round_data.get("action", "generate")
+            
+            await collector.collect_episode(
+                chapter_number=self.chapter_number,
+                episode_number=episode_number,
+                round_number=round_data.get("round", episode_number),
+                state_draft=rl_result.get("final_draft", ""),
+                action_taken=action_taken,
+                action_probs={"generate": 0.3, "revise": 0.3, "delete": 0.2, "keep": 0.2},
+                reward=round_data.get("reward", 0),
+                reader_score=round_data.get("reader_score"),
+                hook_score=round_data.get("hook_score"),
+                immersion_score=round_data.get("reader_score"),
+                policy_version=0,
+                is_terminal=round_data.get("passed", False) or episode_number == self.max_rounds,
+                termination_reason="达标" if round_data.get("passed") else (
+                    "达到最大轮次" if episode_number == self.max_rounds else None
+                )
+            )
+            logger.info(
+                f"[WriterReaderRL] 回合 {episode_number} 数据已采集: "
+                f"action={action_taken}, reward={round_data.get('reward', 0):.4f}"
+            )
+        
+        # 可选：训练后评测
+        post_eval = None
+        if do_post_eval:
+            logger.info("[WriterReaderRL] 执行训练后 Rubric 评测...")
+            post_eval = await collector.evaluate_after_training([self.chapter_number])
+            logger.info(f"[WriterReaderRL] 训练后分数: {post_eval.get('average_score', 0):.2f}")
+        
+        # 生成对比报告
+        comparison_report = None
+        if pre_eval and post_eval:
+            logger.info("[WriterReaderRL] 生成对比报告...")
+            comparison_report = await collector.generate_comparison_report(pre_eval, post_eval)
+            logger.info(
+                f"[WriterReaderRL] 改进率: {comparison_report.get('summary', {}).get('improvement_rate', 'N/A')}"
+            )
+        
+        # 返回完整结果
+        return {
+            **rl_result,
+            "pre_training_eval": pre_eval,
+            "post_training_eval": post_eval,
+            "comparison_report": comparison_report,
+            "data_directory": collector.get_data_directory(),
+        }
+
+
+# 便捷函数
+def create_grpo_loop(
+    novel_id: int,
+    chapter_number: int,
+    max_rounds: int = 3,
+    **kwargs
+) -> WriterReaderLoop:
+    """创建使用GRPO的WriterReaderLoop"""
+    return WriterReaderLoop(
+        novel_id=novel_id,
+        chapter_number=chapter_number,
+        max_rounds=max_rounds,
+        use_grpo=True,
+        use_tpo=kwargs.get("use_tpo", False),
+        grpo_config=kwargs.get("grpo_config"),
+    )

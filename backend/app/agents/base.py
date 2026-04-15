@@ -160,9 +160,21 @@ class BaseAgent(ABC):
             raise
 
     def get_react_max_steps(self, context: Optional[Dict[str, Any]] = None) -> int:
-        """返回当前Agent的默认循环步数。"""
+        """返回当前Agent的循环步数。
+
+        优先级：
+        1. context["agent_loop_steps"]（运行时传入）
+        2. Agent 子类的 DEFAULT_REACT_MAX_STEPS（类级别配置）
+        3. 全局 AGENT_STEP_CONFIG 中的默认值
+        """
         context = context or {}
-        return int(context.get("agent_loop_steps", self.DEFAULT_REACT_MAX_STEPS))
+        if "agent_loop_steps" in context:
+            return int(context["agent_loop_steps"])
+
+        # 尝试从类名获取特定配置
+        agent_name = self.__class__.__name__
+        from app.agents.step_config import AGENT_STEP_CONFIG
+        return int(AGENT_STEP_CONFIG.get(agent_name, self.DEFAULT_REACT_MAX_STEPS))
 
     def _stringify_react_payload(self, payload: Any) -> str:
         if payload is None:

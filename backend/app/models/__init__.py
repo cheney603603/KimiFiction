@@ -9,6 +9,14 @@ from app.models.character import Character
 from app.models.outline import Outline
 from app.models.memory_node import MemoryNode
 from app.models.feedback import ChapterFeedback, FrameworkAdjustment, WritingSession
+from app.models.rubric import (
+    RubricTemplate,
+    RubricDimension,
+    RubricEvaluation,
+    TrainingEpisode,
+    TrainingBatch,
+    ComparisonReport,
+)
 
 __all__ = [
     "User", 
@@ -20,4 +28,11 @@ __all__ = [
     "ChapterFeedback",
     "FrameworkAdjustment",
     "WritingSession",
+    # Rubric评测相关
+    "RubricTemplate",
+    "RubricDimension",
+    "RubricEvaluation",
+    "TrainingEpisode",
+    "TrainingBatch",
+    "ComparisonReport",
 ]

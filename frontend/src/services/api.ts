@@ -350,3 +350,46 @@ export const exportApi = {
       responseType: 'blob',
     }),
 }
+
+// ─────────────────────────────────────────────────────────────
+// 工作流状态图相关API（合并到上方 workflowApi）
+// ─────────────────────────────────────────────────────────────
+export const workflowGraphApi = {
+  getStatus: (workflowId: string) =>
+    api.get<WorkflowStatus>(`/workflow/status/${workflowId}`),
+
+  getProgress: (novelId: number) =>
+    api.get<WorkflowGraphProgress>(`/workflow/progress/${novelId}`),
+
+  startWorkflow: (data: { novel_id: number; user_input?: string }) =>
+    api.post('/workflow/start', data),
+}
+
+// ─────────────────────────────────────────────────────────────
+// RL训练相关API
+// ─────────────────────────────────────────────────────────────
+export const trainingApi = {
+  // 批次管理
+  listBatches: (params?: { novel_id?: number; status?: string; limit?: number }) =>
+    api.get<TrainingBatch[]>('/training/batches', { params }),
+
+  getBatchReport: (batchId: number) =>
+    api.get<TrainingReport>(`/training/batch/${batchId}/report`),
+
+  getBatchEpisodes: (batchId: number, params?: { chapter_number?: number; limit?: number }) =>
+    api.get<TrainingEpisode[]>(`/training/batch/${batchId}/episodes`, { params }),
+
+  getTrainingStatus: () =>
+    api.get<TrainingStatus>('/training/status'),
+
+  // Rubric评测
+  listEvaluations: (params: { novel_id: number; eval_type?: string; chapter_number?: number; limit?: number }) =>
+    api.get<RubricEvaluation[]>('/training/evaluations', { params }),
+
+  getEvaluation: (evaluationId: number) =>
+    api.get<RubricEvaluation>(`/training/evaluation/${evaluationId}`),
+
+  // 训练控制
+  startTraining: (data: StartTrainingRequest) =>
+    api.post('/training/start', data),
+}

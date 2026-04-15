@@ -38,3 +38,26 @@ Thumbs.db
 *.db
 *.sqlite
 *.sqlite3
+
+# Training runs (large artifacts)
+training_runs/
+
+# Model weights (large binary files)
+models/*.gguf
+models/*.bin
+models/*.safetensors
+
+# Workspace config (local only)
+.workbuddy/
+
+# Reference novels (copyrighted)
+reference/
+
+# Root-level experiment scripts (ad-hoc)
+run_*.py
+verify_project.py
+
+# Project planning docs (optional)
+ANALYSIS_AND_PLAN.md
+IMPLEMENTATION_SUMMARY.md
+PROJECT_SUMMARY.md

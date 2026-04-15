@@ -7,10 +7,14 @@ import { ChapterWriter } from './pages/ChapterWriter'
 import { CharacterManager } from './pages/CharacterManager'
 import { OutlineEditor } from './pages/OutlineEditor'
 import { WorkflowChat } from './pages/WorkflowChat'
-import { WorkflowPage } from './pages/WorkflowPage'  // 新版工作流页面
+import { WorkflowPage } from './pages/WorkflowPage'
 import { LLMSettings } from './pages/LLMSettings'
 import { Login } from './pages/Login'
 import { Register } from './pages/Register'
+// 新的多智能体协作和RL训练可视化页面
+import { AgentWorkflow } from './pages/AgentWorkflow'
+import { TrainingDashboard } from './pages/TrainingDashboard'
+import { RLVisualization } from './pages/RLVisualization'
 
 // 检查是否已登录
 const isAuthenticated = () => {
@@ -31,7 +35,7 @@ function App() {
       {/* 公开路由 */}
       <Route path="/login" element={<Login />} />
       <Route path="/register" element={<Register />} />
-      
+
       {/* 受保护路由 */}
       <Route
         path="/"
@@ -50,8 +54,13 @@ function App() {
         <Route path="novel/:novelId/workflow" element={<WorkflowChat />} />
         <Route path="novel/:novelId/workflow/new" element={<WorkflowPage />} />
         <Route path="settings/llm" element={<LLMSettings />} />
+
+        {/* 新增：多智能体协作与RL训练 */}
+        <Route path="workflow/graph" element={<AgentWorkflow />} />
+        <Route path="training" element={<TrainingDashboard />} />
+        <Route path="training/:batchId" element={<RLVisualization />} />
       </Route>
-      
+
       {/* 默认重定向 */}
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

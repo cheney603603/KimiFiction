@@ -314,3 +314,152 @@ export interface WorkflowLog {
   step: string
   extra?: Record<string, unknown>
 }
+
+// ─────────────────────────────────────────────────────────────
+// 多智能体协作状态图类型
+// ─────────────────────────────────────────────────────────────
+
+export type NodeStatus = 'pending' | 'running' | 'success' | 'failed' | 'waiting'
+
+export interface AgentNode {
+  id: string
+  name: string
+  phase: string
+  status: NodeStatus
+  x: number
+  y: number
+  startTime?: string
+  endTime?: string
+  logs: LogEntry[]
+}
+
+export interface LogEntry {
+  timestamp: string
+  agent: string
+  type: 'thought' | 'action' | 'observation' | 'error' | 'info'
+  content: string
+}
+
+export interface WorkflowStatus {
+  workflow_id: string
+  current_phase: string
+  current_node: string
+  nodes: AgentNode[]
+  checkpoint_id?: string
+  can_resume: boolean
+  last_checkpoint?: {
+    node: string
+    phase: string
+    timestamp: string
+    progress: number
+  }
+}
+
+// 工作流状态图专用的进度类型（与上方 WorkflowProgress 区分）
+export interface WorkflowGraphProgress {
+  total_chapters: number
+  completed_chapters: number
+  current_chapter: number
+  current_node: string
+  progress_pct: number
+}
+
+// ─────────────────────────────────────────────────────────────
+// RL训练相关类型
+// ─────────────────────────────────────────────────────────────
+
+export interface TrainingBatch {
+  id: number
+  batch_name: string
+  batch_type: string
+  episode_count: number
+  avg_reward: number
+  best_reward: number
+  improvement_score?: number
+  status: string
+  created_at: string
+}
+
+export interface DimensionScore {
+  name: string
+  pre_score: number
+  post_score: number
+  improvement: number
+}
+
+export interface ChapterComparison {
+  chapter_number: number
+  pre_score: number
+  post_score: number
+  improvement: number
+}
+
+export interface TrainingReport {
+  report_name: string
+  batch_name: string
+  summary: {
+    pre_training_score: number
+    post_training_score: number
+    absolute_improvement: number
+    improvement_rate: string
+    chapter_count: number
+  }
+  dimension_analysis: {
+    average_improvements: Record<string, number>
+    best_improved_dimensions: Array<{ dimension: string; improvement: number }>
+    needs_attention_dimensions: Array<{ dimension: string; improvement: number }>
+  }
+  chapter_comparisons: ChapterComparison[]
+  key_findings: string[]
+  recommendations: string[]
+  generated_at: string
+}
+
+export interface TrainingEpisode {
+  episode_number: number
+  chapter_number: number
+  round_number: number
+  action: string
+  action_probs: Record<string, number>
+  reward: number
+  cumulative_reward: number
+  reader_score?: number
+  hook_score?: number
+  immersion_score?: number
+  rubric_score?: number
+  is_terminal: boolean
+  termination_reason?: string
+  created_at: string
+}
+
+export interface TrainingStatus {
+  total_batches: number
+  total_episodes: number
+  total_chapters_trained: number
+  avg_reward: number
+  best_reward: number
+  latest_batch?: TrainingBatch
+}
+
+export interface RubricEvaluation {
+  evaluation_id: number
+  chapter_number: number
+  eval_type: string
+  total_score: number
+  weighted_score: number
+  dimension_scores: Record<string, { score: number; weight: number; weighted_score: number }>
+  summary?: string
+  strengths: string[]
+  weaknesses: string[]
+  improvement_suggestions: string[]
+  created_at: string
+}
+
+export interface StartTrainingRequest {
+  novel_id: number
+  chapter_numbers: number[]
+  batch_name?: string
+  max_rounds: number
+  do_pre_eval: boolean
+  do_post_eval: boolean
+}
