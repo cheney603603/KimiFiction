@@ -15,6 +15,7 @@ import { Register } from './pages/Register'
 import { AgentWorkflow } from './pages/AgentWorkflow'
 import { TrainingDashboard } from './pages/TrainingDashboard'
 import { RLVisualization } from './pages/RLVisualization'
+import { Evaluation } from './pages/Evaluation'
 
 // 检查是否已登录
 const isAuthenticated = () => {
@@ -59,6 +60,7 @@ function App() {
         <Route path="workflow/graph" element={<AgentWorkflow />} />
         <Route path="training" element={<TrainingDashboard />} />
         <Route path="training/:batchId" element={<RLVisualization />} />
+        <Route path="evaluation" element={<Evaluation />} />
       </Route>
 
       {/* 默认重定向 */}

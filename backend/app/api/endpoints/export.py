@@ -7,7 +7,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
-from app.core.auth import require_auth
+from app.core.auth import require_auth, get_current_user
 from app.services.export_service import ExportService
 
 router = APIRouter()
@@ -157,3 +157,26 @@ async def export_outline(
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"导出失败: {str(e)}")
+
+
+@router.get("/reference/{filename}")
+async def get_reference_file(
+    filename: str,
+    current_user = Depends(get_current_user)
+):
+    """读取 reference 目录下的参考小说文件"""
+    from pathlib import Path
+    from fastapi.responses import FileResponse
+
+    backend_dir = Path(__file__).resolve().parent.parent.parent
+    project_dir = backend_dir.parent
+    ref_file = project_dir / "reference" / filename
+
+    if not ref_file.exists():
+        raise HTTPException(status_code=404, detail=f"文件不存在: {filename}")
+
+    return FileResponse(
+        ref_file,
+        media_type="text/plain; charset=utf-8",
+        filename=filename,
+    )

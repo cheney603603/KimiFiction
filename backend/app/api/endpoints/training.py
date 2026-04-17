@@ -379,3 +379,320 @@ async def get_training_status(
     except Exception as e:
         logger.error(f"获取训练状态失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
+
+# ============================================================
+# 八维 LLM Rubric 评测接口
+# ============================================================
+
+class EvaluationRequest(BaseModel):
+    novel_id: Optional[int] = None
+    text: Optional[str] = None
+    genre: str = "玄幻"
+    eval_type: str = "llm"  # "llm" | "keyword"
+
+
+@router.get("/evaluation/references", response_model=Dict[str, Any])
+async def list_reference_novels(
+    current_user = Depends(get_current_user)
+):
+    """列出 reference 目录下所有可评测的小说文件"""
+    import os, re
+    from pathlib import Path
+
+    # 找到项目根目录
+    backend_dir = Path(__file__).resolve().parent.parent.parent
+    project_dir = backend_dir.parent
+    ref_dir = project_dir / "reference"
+
+    files = []
+    if ref_dir.exists():
+        for fp in sorted(ref_dir.glob("*.txt")):
+            for enc in ["utf-8-sig", "utf-8", "gbk", "gb18030"]:
+                try:
+                    with open(fp, encoding=enc) as f:
+                        c = f.read()
+                    if len(re.findall(r"[\u4e00-\u9fff]", c)) < 100:
+                        continue
+                    name = fp.stem
+                    author = "?"
+                    if "作者：" in name:
+                        parts = name.split("作者：")
+                        name = parts[0].strip()
+                        author = parts[1].strip() if len(parts) > 1 else "?"
+                    elif "by" in name:
+                        parts = name.split("by")
+                        name = parts[0].strip()
+                        author = parts[1].strip() if len(parts) > 1 else "?"
+                    wc = len(re.findall(r"[\u4e00-\u9fff]", c)) + len(re.findall(r"[a-zA-Z]+", c))
+                    files.append({
+                        "filename": fp.name,
+                        "name": name,
+                        "author": author,
+                        "size_kb": round(fp.stat().st_size / 1024, 1),
+                        "char_count": len(c),
+                        "word_count": wc,
+                    })
+                    break
+                except Exception:
+                    continue
+
+    return {"success": True, "count": len(files), "files": files}
+
+
+@router.post("/evaluation/run", response_model=Dict[str, Any])
+async def run_evaluation(
+    request: EvaluationRequest,
+    current_user = Depends(get_current_user)
+):
+    """
+    运行八维 LLM Rubric 评测
+
+    支持两种模式：
+    - eval_type="llm": 调用 DeepSeek API 逐条判断 Yes/No
+    - eval_type="keyword": 基于关键词规则评分
+    """
+    import os, re, json, time
+    from pathlib import Path
+    from collections import defaultdict
+    import csv as csvmod
+    from io import StringIO
+    from datetime import datetime
+
+    # 1. 加载规则
+    backend_dir = Path(__file__).resolve().parent.parent.parent
+    project_dir = backend_dir.parent
+    rules_file = project_dir / "evaluate_rules_llm.csv"
+    if not rules_file.exists():
+        return {"success": False, "error": f"规则文件不存在: {rules_file}"}
+
+    # 加载 env
+    backend_env = project_dir / "backend" / ".env"
+    if backend_env.exists():
+        with open(backend_env, "r", encoding="utf-8") as f:
+            for line in f:
+                line = line.strip()
+                if line and not line.startswith("#") and "=" in line:
+                    k, v = line.split("=", 1)
+                    os.environ.setdefault(k.strip(), v.strip())
+
+    dims = {}
+    rules = []
+    with open(rules_file, "r", encoding="utf-8") as f:
+        content = f.read()
+
+    section = None
+    for line in content.split("\n"):
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("===") or line.startswith("---"):
+            continue
+        if line == "[dimensions]":
+            section = "dims"
+            continue
+        elif line == "[rules]":
+            section = "rules"
+            continue
+        if not section:
+            continue
+        try:
+            reader = csvmod.reader(StringIO(line), quotechar='"')
+            parts = next(reader)
+        except:
+            continue
+        if section == "dims" and len(parts) >= 4:
+            try:
+                dims[parts[0]] = dict(id=parts[0], name=parts[1], weight=float(parts[2]), desc=parts[3])
+            except:
+                pass
+        elif section == "rules" and len(parts) >= 4:
+            did = parts[1].strip()
+            w = dims.get(did, {}).get("weight", 0.1)
+            rules.append({
+                "rule_id": parts[0].strip(),
+                "dimension": did,
+                "name": parts[2].strip(),
+                "desc": parts[3].strip() if len(parts) > 3 else "",
+                "weight": w,
+            })
+
+    by_dim = defaultdict(list)
+    for r in rules:
+        by_dim[r["dimension"]].append(r)
+
+    # 2. 获取评测文本
+    text = request.text
+    if not text:
+        return {"success": False, "error": "text 为空"}
+
+    # 截取用于评测的文本（不超过 20000 字）
+    def eval_text(t):
+        n = len(t)
+        if n < 10000:
+            return t
+        head = t[: int(n * 0.3)]
+        mid_start, mid_end = int(n * 0.35), int(n * 0.65)
+        tail_start = int(n * 0.7)
+        while len(head) + (mid_end - mid_start) + (n - tail_start) > 20000 and (mid_end - mid_start) > 1000:
+            mid_end -= 1000
+        return head + "\n[...省略中间...]\n" + t[mid_start:mid_end] + "\n[...省略...]\n" + t[tail_start:]
+
+    eval_text_str = eval_text(text)
+
+    # 3. LLM 评测
+    provider = os.environ.get("LLM_PROVIDER", "deepseek")
+    BATCH = 10
+    judgments = []
+    api_calls = 0
+
+    if request.eval_type == "llm":
+        if provider == "deepseek":
+            from openai import OpenAI
+            client = OpenAI(
+                api_key=os.environ.get("DEEPSEEK_API_KEY", ""),
+                base_url=os.environ.get("DEEPSEEK_BASE_URL", "https://api.deepseek.com"),
+            )
+            model = os.environ.get("DEEPSEEK_MODEL", "deepseek-chat")
+        else:
+            return {"success": False, "error": f"不支持的 provider: {provider}"}
+
+        for did, dinfo in dims.items():
+            dim_rules = by_dim[did]
+            for i in range(0, len(dim_rules), BATCH):
+                batch = dim_rules[i : i + BATCH]
+                api_calls += 1
+                rules_text = "\n".join(
+                    f"规则{i2+1} [{r['rule_id']}] {r['name']}:\n  {r['desc']}"
+                    for i2, r in enumerate(batch)
+                )
+
+                prompt = (
+                    f"小说片段:\n{eval_text_str}\n\n"
+                    f"**评测规则**:\n{rules_text}\n\n"
+                    f'**输出格式** (只输出JSON数组，不要其他文字):\n'
+                    f'[{{"rule_id":"R1","answer":"Yes","reason":"判断依据"}},\n'
+                    f' {{"rule_id":"R2","answer":"No","reason":"理由"}}]'
+                )
+
+                try:
+                    resp = client.chat.completions.create(
+                        model=model,
+                        messages=[
+                            {"role": "system", "content": "你是严谨的小说评测专家。只输出JSON数组，answer只能是Yes或No。"},
+                            {"role": "user", "content": prompt},
+                        ],
+                        temperature=0.1,
+                    )
+
+                    text_resp = resp.choices[0].message.content
+                    m = re.search(r"\[\s*\{.*?\}\s*\]", text_resp, re.DOTALL)
+                    if m:
+                        results = json.loads(m.group())
+                        for item in results:
+                            judgments.append({
+                                "rule_id": item.get("rule_id", ""),
+                                "dimension": did,
+                                "answer": item.get("answer", "No").strip(),
+                                "reason": item.get("reason", "")[:200],
+                            })
+                    else:
+                        for r in batch:
+                            judgments.append({"rule_id": r["rule_id"], "dimension": did, "answer": "No", "reason": "parse fail"})
+                except Exception as e:
+                    for r in batch:
+                        judgments.append({"rule_id": r["rule_id"], "dimension": did, "answer": "No", "reason": str(e)[:100]})
+
+                time.sleep(0.3)
+
+    # 4. 计算各维度得分
+    dim_results = []
+    total_weighted = 0
+    total_weight = 0
+    judgment_map = {j["rule_id"]: j for j in judgments}
+
+    for did, dinfo in dims.items():
+        dim_rules = by_dim[did]
+        dim_judgments = [judgment_map.get(r["rule_id"], {"answer": "No", "reason": ""}) for r in dim_rules]
+        passed = sum(1 for j in dim_judgments if j.get("answer", "").lower() == "yes")
+        score = max(1.0, min(10.0, (passed / len(dim_rules)) * 10)) if dim_rules else 5.0
+        dim_results.append({
+            "id": did,
+            "name": dinfo["name"],
+            "weight": dinfo["weight"],
+            "weight_pct": round(dinfo["weight"] * 100, 1),
+            "total_rules": len(dim_rules),
+            "passed": passed,
+            "failed": len(dim_rules) - passed,
+            "score": round(score, 1),
+            "bar": "\u2588" * int(score) + "\u2591" * (10 - int(score)),
+            "judgments": [
+                {
+                    "rule_id": r["rule_id"],
+                    "name": r["name"],
+                    "answer": judgment_map.get(r["rule_id"], {}).get("answer", "No"),
+                    "reason": judgment_map.get(r["rule_id"], {}).get("reason", "")[:80],
+                }
+                for r in dim_rules
+            ],
+        })
+        total_weighted += score * dinfo["weight"]
+        total_weight += dinfo["weight"]
+
+    final_score = round(total_weighted / total_weight, 1) if total_weight > 0 else 0
+    rank = "S" if final_score >= 90 else "A" if final_score >= 80 else "B" if final_score >= 70 else "C" if final_score >= 60 else "D" if final_score >= 50 else "F"
+
+    # 5. 保存结果
+    ts = datetime.now().strftime("%Y%m%d_%H%M%S")
+    out_dir = project_dir / "training_runs"
+    out_dir.mkdir(exist_ok=True)
+    result = {
+        "success": True,
+        "eval_type": request.eval_type,
+        "genre": request.genre,
+        "timestamp": ts,
+        "total_score": final_score,
+        "rank": rank,
+        "api_calls": api_calls,
+        "dims": dim_results,
+        "total_rules": len(rules),
+    }
+
+    json_path = out_dir / f"eval_{ts}.json"
+    with open(json_path, "w", encoding="utf-8") as f:
+        json.dump(result, f, ensure_ascii=False, indent=2)
+
+    return result
+
+
+@router.get("/evaluation/results", response_model=Dict[str, Any])
+async def list_evaluation_results(
+    limit: int = 20,
+    current_user = Depends(get_current_user)
+):
+    """列出最近的评测结果"""
+    from pathlib import Path
+    import json
+
+    backend_dir = Path(__file__).resolve().parent.parent.parent
+    project_dir = backend_dir.parent
+    out_dir = project_dir / "training_runs"
+
+    results = []
+    if out_dir.exists():
+        for fp in sorted(out_dir.glob("eval_*.json"), reverse=True)[:limit]:
+            try:
+                with open(fp, encoding="utf-8") as f:
+                    data = json.load(f)
+                results.append({
+                    "filename": fp.name,
+                    "timestamp": data.get("timestamp", ""),
+                    "eval_type": data.get("eval_type", ""),
+                    "total_score": data.get("total_score", 0),
+                    "rank": data.get("rank", ""),
+                    "api_calls": data.get("api_calls", 0),
+                    "genre": data.get("genre", ""),
+                })
+            except Exception:
+                pass
+
+    return {"success": True, "count": len(results), "results": results}

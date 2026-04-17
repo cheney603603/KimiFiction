@@ -1,4 +1,4 @@
-﻿# Byte-compiled / optimized Python files
+# Byte-compiled / optimized Python files
 __pycache__/
 *.py[cod]
 *.egg-info/
@@ -25,6 +25,7 @@ dist-ssr/
 # Logs
 logs/
 *.log
+backend_log*.txt
 
 # Debug output
 debug_llm/
@@ -54,10 +55,22 @@ models/*.safetensors
 reference/
 
 # Root-level experiment scripts (ad-hoc)
-run_*.py
-verify_project.py
+# These are now organized in scripts/ directory
 
-# Project planning docs (optional)
+# Project planning docs (local drafts)
 ANALYSIS_AND_PLAN.md
 IMPLEMENTATION_SUMMARY.md
 PROJECT_SUMMARY.md
+
+# Backup files
+*.bak
+
+# Temporary debugging files
+lines_*.txt
+
+# Pytest cache
+.pytest_cache/
+
+# Coverage
+.coverage
+htmlcov/

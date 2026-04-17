@@ -1,0 +1,1645 @@
+# ============================================================
+# KimiFiction 长文本八维精细化评分规则配置 v2.0
+# ============================================================
+# 说明：
+# - 每条规则有关键词列表，统计文本中关键词出现次数
+# - 支持正则表达式关键词（以 r" 开头）
+# - 阈值决定通过条件
+# - 权重用于最终加权汇总
+# ============================================================
+
+# ============================================================
+# 元数据
+# ============================================================
+metadata:
+  version: "2.0"
+  total_rules: 88
+  last_updated: "2026-04-16"
+  description: "长文本八维精细化评分规则，每维度10-20条独立规则，每条规则0或1分"
+
+# ============================================================
+# 八维权重配置 (必须总和为1.0)
+# ============================================================
+dimensions:
+  - id: "plot_consistency"
+    name: "情节一致性"
+    weight: 0.20
+    description: "故事线是否连贯、是否有伏笔、是否有高潮、是否自洽"
+    
+  - id: "logic_rationality"
+    name: "逻辑合理性"
+    weight: 0.20
+    description: "因果关系是否合理、动机是否充分、事件发展是否自洽"
+    
+  - id: "character_consistency"
+    name: "角色一致性"
+    weight: 0.15
+    description: "角色行为、对话、心理是否与其人设一致"
+    
+  - id: "style_matching"
+    name: "风格匹配度"
+    weight: 0.15
+    description: "文笔是否流畅、描写是否细腻、是否有语病"
+    
+  - id: "world_consistency"
+    name: "世界观一致性"
+    weight: 0.10
+    description: "设定是否自洽、力量体系是否稳定、地理/社会是否合理"
+    
+  - id: "narrative_flow"
+    name: "叙事流畅度"
+    weight: 0.10
+    description: "过渡是否自然、节奏是否张弛有度、视角是否稳定"
+    
+  - id: "emotional_impact"
+    name: "情感冲击力"
+    weight: 0.05
+    description: "是否能引发读者共情、是否有情感高潮"
+    
+  - id: "hook_strength"
+    name: "钩子强度"
+    weight: 0.05
+    description: "开篇是否有吸引力、是否设置悬念、是否让读者想继续读"
+
+# ============================================================
+# 规则库
+# 每个规则包含:
+#   rule_id:  规则唯一ID (如 R1, L2, C3)
+#   name:     规则名称
+#   keywords: 关键词列表
+#   threshold: 触发阈值（关键词出现次数 >= threshold 时得分=1）
+#   max_score: 该维度下的最大规则数（用于归一化）
+#   evidence_mode: "count" (统计关键词数量) | "pattern" (正则匹配) | "custom" (特殊逻辑)
+#   description: 规则说明
+# ============================================================
+
+rules:
+
+  # =============================================
+  # 维度1: 情节一致性 (12条规则, 权重20%)
+  # =============================================
+  - dimension: "情节一致性"
+    category: "plot_consistency"
+    rule_id: "R1"
+    name: "主线冲突/目标明确"
+    description: "存在明确的主线冲突/目标"
+    keywords:
+      - "目标"
+      - "目的"
+      - "危机"
+      - "威胁"
+      - "敌人"
+      - "对手"
+      - "挑战"
+      - "任务"
+      - "使命"
+      - "竞争"
+      - "争夺"
+      - "生存"
+      - "困境"
+    threshold: 3
+    max_score: 12
+    evidence_mode: "count"
+
+  - dimension: "情节一致性"
+    category: "plot_consistency"
+    rule_id: "R2"
+    name: "伏笔设置充分"
+    description: "存在伏笔且伏笔数量充足 (≥5个伏笔标记)"
+    keywords:
+      - "伏笔"
+      - "暗示"
+      - "预示"
+      - "预兆"
+      - "伏"
+      - "伏下"
+      - "伏在"
+      - "埋下"
+      - "埋下伏"
+    threshold: 5
+    max_score: 12
+    evidence_mode: "count"
+
+  - dimension: "情节一致性"
+    category: "plot_consistency"
+    rule_id: "R3"
+    name: "存在高潮场景"
+    description: "存在高潮场景描写"
+    keywords:
+      - "爆发"
+      - "高潮"
+      - "转折"
+      - "逆转"
+      - "决"
+      - "决战"
+      - "对决"
+      - "激战"
+      - "生死"
+    threshold: 2
+    max_score: 12
+    evidence_mode: "count"
+
+  - dimension: "情节一致性"
+    category: "plot_consistency"
+    rule_id: "R4"
+    name: "因果关系链完整"
+    description: "因果关系链完整 (因为/所以/于是 ≥3)"
+    keywords:
+      - "因为"
+      - "导致"
+      - "于是"
+    threshold: 3
+    max_score: 12
+    evidence_mode: "count"
+
+  - dimension: "情节一致性"
+    category: "plot_consistency"
+    rule_id: "R5"
+    name: "时间线标记清晰"
+    description: "时间线有明确标记 (≥10处时间词)"
+    keywords:
+      - "第"
+      - "年"
+      - "月"
+      - "日"
+      - "时"
+      - "刻"
+      - "天"
+      - "夜"
+      - "早"
+      - "午"
+      - "晚"
+      - "晨"
+    threshold: 10
+    max_score: 12
+    evidence_mode: "count"
+
+  - dimension: "情节一致性"
+    category: "plot_consistency"
+    rule_id: "R6"
+    name: "情节有节奏阶段"
+    description: "情节推进有阶段/节奏感 (≥3处)"
+    keywords:
+      - "第一阶段"
+      - "第二阶段"
+      - "第三章"
+      - "终于"
+      - "最终"
+      - "最后"
+      - "起初"
+      - "随后"
+      - "接下来"
+    threshold: 3
+    max_score: 12
+    evidence_mode: "count"
+
+  - dimension: "情节一致性"
+    category: "plot_consistency"
+    rule_id: "R7"
+    name: "存在次要情节线"
+    description: "存在至少一个次要情节线"
+    keywords:
+      - "支线"
+      - "副线"
+      - "另外"
+      - "与此同时"
+      - "另一边"
+      - "来到"
+      - "抵达"
+      - "进入"
+      - "出现在"
+    threshold: 5
+    max_score: 12
+    evidence_mode: "count"
+
+  - dimension: "情节一致性"
+    category: "plot_consistency"
+    rule_id: "R8"
+    name: "结尾有收束"
+    description: "结尾有交代/收束感"
+    keywords:
+      - "终于"
+      - "最终"
+      - "结局"
+      - "完结"
+      - "结束"
+      - "落幕"
+      - "告一段落"
+      - "画上句号"
+    threshold: 1
+    max_score: 12
+    evidence_mode: "count"
+
+  - dimension: "情节一致性"
+    category: "plot_consistency"
+    rule_id: "R9"
+    name: "冲突递进升级"
+    description: "冲突有升级递进 (≥3处)"
+    keywords:
+      - "越来"
+      - "不断"
+      - "逐步"
+      - "越来越"
+      - "不断升级"
+      - "日益"
+    threshold: 3
+    max_score: 12
+    evidence_mode: "count"
+
+  - dimension: "情节一致性"
+    category: "plot_consistency"
+    rule_id: "R10"
+    name: "悬念推动情节"
+    description: "悬念钩子推动情节 (≥3处)"
+    keywords:
+      - "？"
+      - "？"
+      - "疑问"
+      - "好奇"
+      - "不解"
+      - "未知"
+      - "神秘"
+      - "隐藏"
+      - "秘密"
+    threshold: 3
+    max_score: 12
+    evidence_mode: "count"
+
+  - dimension: "情节一致性"
+    category: "plot_consistency"
+    rule_id: "R11"
+    name: "行动与目标一致"
+    description: "角色行动与目标一致 (≥3处)"
+    keywords:
+      - "为了"
+      - "朝着"
+      - "向着"
+      - "奔向"
+      - "努力"
+      - "争取"
+      - "追求"
+    threshold: 3
+    max_score: 12
+    evidence_mode: "count"
+
+  - dimension: "情节一致性"
+    category: "plot_consistency"
+    rule_id: "R12"
+    name: "情节有转折"
+    description: "情节有转折而非平铺直叙 (≥3处)"
+    keywords:
+      - "没想到"
+      - "出乎意料"
+      - "谁知"
+      - "却不料"
+      - "然而"
+      - "突然"
+      - "竟然"
+      - "居然"
+      - "万万没想到"
+    threshold: 3
+    max_score: 12
+    evidence_mode: "count"
+
+
+  # =============================================
+  # 维度2: 逻辑合理性 (10条规则, 权重20%)
+  # =============================================
+  - dimension: "逻辑合理性"
+    category: "logic_rationality"
+    rule_id: "L1"
+    name: "逻辑连接词丰富"
+    description: "逻辑连接词丰富 (≥15处)"
+    keywords:
+      - "因为"
+      - "所以"
+      - "因此"
+      - "然而"
+      - "但是"
+      - "虽然"
+      - "尽管"
+      - "既然"
+      - "如果"
+      - "那么"
+      - "于是"
+      - "由于"
+      - "以至于"
+      - "只要"
+    threshold: 15
+    max_score: 10
+    evidence_mode: "count"
+
+  - dimension: "逻辑合理性"
+    category: "logic_rationality"
+    rule_id: "L2"
+    name: "无明显逻辑漏洞"
+    description: "无明显的逻辑漏洞标记"
+    keywords:
+      - "突然"
+      - "莫名其妙"
+      - "毫无预兆"
+      - "无缘无故"
+      - "毫无道理"
+    threshold: 6  # ≤5处为通过
+    max_score: 10
+    evidence_mode: "count_inverse"  # 关键词越少越好
+
+  - dimension: "逻辑合理性"
+    category: "logic_rationality"
+    rule_id: "L3"
+    name: "角色动机有交代"
+    description: "角色动机有交代 (≥5处)"
+    keywords:
+      - "因为"
+      - "为了"
+      - "出于"
+      - "由于"
+      - "动机"
+      - "原因"
+      - "目的"
+      - "不得不"
+    threshold: 5
+    max_score: 10
+    evidence_mode: "count"
+
+  - dimension: "逻辑合理性"
+    category: "logic_rationality"
+    rule_id: "L4"
+    name: "事件发展有顺序支撑"
+    description: "事件发展有时间顺序支撑 (≥3处)"
+    keywords:
+      - "首先"
+      - "其次"
+      - "然后"
+      - "接着"
+      - "随后"
+      - "最后"
+    threshold: 3
+    max_score: 10
+    evidence_mode: "count"
+
+  - dimension: "逻辑合理性"
+    category: "logic_rationality"
+    rule_id: "L5"
+    name: "能力/道具使用有代价限制"
+    description: "能力/道具使用有代价/限制 (≥2处)"
+    keywords:
+      - "代价"
+      - "限制"
+      - "副作用"
+      - "消耗"
+    threshold: 2
+    max_score: 10
+    evidence_mode: "count"
+
+  - dimension: "逻辑合理性"
+    category: "logic_rationality"
+    rule_id: "L6"
+    name: "冲突结果有铺垫"
+    description: "冲突结果有铺垫 (≥5处)"
+    keywords:
+      - "凭借"
+      - "依靠"
+      - "利用"
+      - "借助"
+      - "靠着"
+      - "通过"
+      - "使用"
+    threshold: 5
+    max_score: 10
+    evidence_mode: "count"
+
+  - dimension: "逻辑合理性"
+    category: "logic_rationality"
+    rule_id: "L7"
+    name: "信息获取有来源"
+    description: "知识/信息获取有来源 (≥3处)"
+    keywords:
+      - "据说"
+      - "听说"
+      - "相传"
+      - "书中记载"
+      - "资料显示"
+    threshold: 3
+    max_score: 10
+    evidence_mode: "count"
+
+  - dimension: "逻辑合理性"
+    category: "logic_rationality"
+    rule_id: "L8"
+    name: "位置移动有说明"
+    description: "地图/位置移动有说明 (≥5处)"
+    keywords:
+      - "从"
+      - "到"
+      - "前往"
+      - "来到"
+      - "经过"
+      - "穿过"
+      - "越过"
+      - "沿着"
+      - "通过"
+    threshold: 5
+    max_score: 10
+    evidence_mode: "count"
+
+  - dimension: "逻辑合理性"
+    category: "logic_rationality"
+    rule_id: "L9"
+    name: "无能力凭空出现"
+    description: "无超自然能力凭空出现"
+    keywords:
+      - "凭空"
+      - "突然就会"
+      - "莫名其妙就会"
+      - "毫无原因就会"
+    threshold: 1  # 出现1次即为有凭空能力，不得分
+    max_score: 10
+    evidence_mode: "count_inverse"
+
+  - dimension: "逻辑合理性"
+    category: "logic_rationality"
+    rule_id: "L10"
+    name: "数值量级描述一致"
+    description: "数值/量级描述一致"
+    keywords:
+      - "万"
+      - "亿"
+      - "十"
+      - "百"
+      - "千"
+    threshold: 1  # 有大数单位即可
+    max_score: 10
+    evidence_mode: "count"
+
+
+  # =============================================
+  # 维度3: 角色一致性 (12条规则, 权重15%)
+  # =============================================
+  - dimension: "角色一致性"
+    category: "character_consistency"
+    rule_id: "C1"
+    name: "主角有明确外貌描写"
+    description: "主角有明确外貌/身份描述 (≥2处)"
+    keywords:
+      - "身高"
+      - "面容"
+      - "长相"
+      - "外貌"
+      - "眼睛"
+      - "身材"
+      - "皮肤"
+      - "穿着"
+      - "服饰"
+      - "模样"
+      - "年约"
+      - "看上"
+    threshold: 2
+    max_score: 12
+    evidence_mode: "count"
+
+  - dimension: "角色一致性"
+    category: "character_consistency"
+    rule_id: "C2"
+    name: "主角性格明确"
+    description: "主角有明确性格标签 (≥3处)"
+    keywords:
+      - "性格"
+      - "为人"
+      - "脾气"
+      - "个性"
+      - "性子"
+      - "沉稳"
+      - "冷静"
+      - "冲动"
+      - "谨慎"
+      - "机智"
+      - "狡猾"
+      - "憨厚"
+    threshold: 3
+    max_score: 12
+    evidence_mode: "count"
+
+  - dimension: "角色一致性"
+    category: "character_consistency"
+    rule_id: "C3"
+    name: "心理描写丰富"
+    description: "心理描写丰富 (≥10处)"
+    keywords:
+      - "想"
+      - "觉得"
+      - "认为"
+      - "心理"
+      - "内心"
+      - "思绪"
+      - "念头"
+      - "感受"
+      - "暗自"
+      - "心中"
+      - "暗暗"
+    threshold: 10
+    max_score: 12
+    evidence_mode: "count"
+
+  - dimension: "角色一致性"
+    category: "character_consistency"
+    rule_id: "C4"
+    name: "对话描写充分"
+    description: "对话描写充分 (≥10处)"
+    keywords:
+      - "说"
+      - "道"
+      - "回答"
+      - "问道"
+      - "道"
+      - "说"
+    threshold: 10
+    max_score: 12
+    evidence_mode: "count"
+
+  - dimension: "角色一致性"
+    category: "character_consistency"
+    rule_id: "C5"
+    name: "角色行为前后呼应"
+    description: "角色行为前后呼应 (≥2处)"
+    keywords:
+      - "一如既往"
+      - "和往常一样"
+      - "果然"
+      - "正如"
+      - "如他所料"
+    threshold: 2
+    max_score: 12
+    evidence_mode: "count"
+
+  - dimension: "角色一致性"
+    category: "character_consistency"
+    rule_id: "C6"
+    name: "角色成长有迹可循"
+    description: "角色成长有迹可循 (≥2处)"
+    keywords:
+      - "成长"
+      - "进步"
+      - "提升"
+      - "变强"
+      - "突破"
+      - "领悟"
+      - "顿悟"
+      - "蜕变"
+    threshold: 2
+    max_score: 12
+    evidence_mode: "count"
+
+  - dimension: "角色一致性"
+    category: "character_consistency"
+    rule_id: "C7"
+    name: "主角有足够的存在感"
+    description: "主角行为描写充分 (≥5处)"
+    keywords:
+      - "站"
+      - "坐"
+      - "走"
+      - "跑"
+      - "躺"
+      - "看"
+      - "听"
+      - "想"
+    threshold: 5
+    max_score: 12
+    evidence_mode: "count"
+
+  - dimension: "角色一致性"
+    category: "character_consistency"
+    rule_id: "C8"
+    name: "配角有区分度"
+    description: "配角有区分度 (≥3类角色)"
+    keywords:
+      - "老者"
+      - "中年人"
+      - "少年"
+      - "少女"
+      - "公子"
+      - "小姐"
+      - "大人"
+      - "长老"
+      - "掌门"
+      - "弟子"
+      - "师兄"
+      - "师姐"
+    threshold: 3
+    max_score: 12
+    evidence_mode: "count"
+
+  - dimension: "角色一致性"
+    category: "character_consistency"
+    rule_id: "C9"
+    name: "角色语言有差异"
+    description: "角色语言风格有差异 (≥3处)"
+    keywords:
+      - "恭敬"
+      - "谦逊"
+      - "傲慢"
+      - "冷漠"
+      - "热情"
+      - "嘲讽"
+      - "严肃"
+      - "轻松"
+    threshold: 3
+    max_score: 12
+    evidence_mode: "count"
+
+  - dimension: "角色一致性"
+    category: "character_consistency"
+    rule_id: "C10"
+    name: "角色反应符合情境"
+    description: "角色反应符合情境 (≥3处)"
+    keywords:
+      - "惊讶"
+      - "震惊"
+      - "欣喜"
+      - "愤怒"
+      - "恐惧"
+      - "担忧"
+      - "疑虑"
+      - "不解"
+    threshold: 3
+    max_score: 12
+    evidence_mode: "count"
+
+  - dimension: "角色一致性"
+    category: "character_consistency"
+    rule_id: "C11"
+    name: "无角色性格突变"
+    description: "无角色性格突变"
+    keywords:
+      - "突然性格"
+      - "瞬间性格"
+      - "毫无征兆地"
+    threshold: 1
+    max_score: 12
+    evidence_mode: "count_inverse"
+
+  - dimension: "角色一致性"
+    category: "character_consistency"
+    rule_id: "C12"
+    name: "群像戏有角色分工"
+    description: "群像戏有角色分工 (≥2处)"
+    keywords:
+      - "各自"
+      - "分工"
+      - "配合"
+      - "协作"
+      - "联手"
+      - "一起"
+      - "共同"
+    threshold: 2
+    max_score: 12
+    evidence_mode: "count"
+
+
+  # =============================================
+  # 维度4: 风格匹配度 (12条规则, 权重15%)
+  # =============================================
+  - dimension: "风格匹配度"
+    category: "style_matching"
+    rule_id: "S1"
+    name: "无明显语病"
+    description: "无病句、语句通顺"
+    keywords:
+      - "的的"
+      - "地地"
+      - "得得"
+    threshold: 4  # ≤3处为通过
+    max_score: 12
+    evidence_mode: "count_inverse"
+
+  - dimension: "风格匹配度"
+    category: "style_matching"
+    rule_id: "S2"
+    name: "标点使用规范"
+    description: "标点使用规范"
+    keywords:
+      - "，"
+      - "。"
+      - "！"
+      - "？"
+    threshold: 1  # 有基本标点即可（占比>1%）
+    max_score: 12
+    evidence_mode: "ratio"
+
+  - dimension: "风格匹配度"
+    category: "style_matching"
+    rule_id: "S3"
+    name: "形容词使用丰富"
+    description: "形容词使用丰富 ('的'字结构)"
+    keywords:
+      - "的"
+    threshold: 3  # '的'字占比>3%
+    max_score: 12
+    evidence_mode: "ratio"
+
+  - dimension: "风格匹配度"
+    category: "style_matching"
+    rule_id: "S4"
+    name: "场景描写细腻"
+    description: "场景描写细腻 (≥5处)"
+    keywords:
+      - "天空"
+      - "大地"
+      - "空气"
+      - "风"
+      - "阳光"
+      - "月光"
+      - "森林"
+      - "河流"
+      - "建筑"
+      - "房间"
+      - "街道"
+      - "城市"
+      - "田野"
+    threshold: 5
+    max_score: 12
+    evidence_mode: "count"
+
+  - dimension: "风格匹配度"
+    category: "style_matching"
+    rule_id: "S5"
+    name: "感官描写多样"
+    description: "感官描写多样 (视觉/听觉/嗅觉/触觉/味觉 ≥3种)"
+    keywords:
+      - "看"
+      - "看见"
+      - "听到"
+      - "声音"
+      - "闻"
+      - "气味"
+      - "感受"
+      - "触摸"
+      - "味道"
+      - "品尝"
+    threshold: 3
+    max_score: 12
+    evidence_mode: "sense_count"
+
+  - dimension: "风格匹配度"
+    category: "style_matching"
+    rule_id: "S6"
+    name: "修辞手法运用"
+    description: "修辞手法运用 (≥3处)"
+    keywords:
+      - "像"
+      - "如"
+      - "仿佛"
+      - "似乎"
+      - "如同"
+      - "宛如"
+      - "恰似"
+    threshold: 3
+    max_score: 12
+    evidence_mode: "count"
+
+  - dimension: "风格匹配度"
+    category: "style_matching"
+    rule_id: "S7"
+    name: "句式长短错落有致"
+    description: "句式长短错落有致 (段落长度方差>200)"
+    keywords:
+      - "。"  # 以句号数量为段落判断
+    threshold: 200  # 段落方差>200
+    max_score: 12
+    evidence_mode: "variance"
+
+  - dimension: "风格匹配度"
+    category: "style_matching"
+    rule_id: "S8"
+    name: "语气/文风统一"
+    description: "语气/文风统一 (语气突变词≤10处)"
+    keywords:
+      - "忽然"
+      - "突然"
+      - "骤然"
+      - "陡然"
+    threshold: 11  # ≤10处为通过
+    max_score: 12
+    evidence_mode: "count_inverse"
+
+  - dimension: "风格匹配度"
+    category: "style_matching"
+    rule_id: "S9"
+    name: "专有词汇使用恰当"
+    description: "专有词汇使用恰当 (≥5处)"
+    keywords:
+      - "缓缓"
+      - "微微"
+      - "轻轻"
+      - "渐渐"
+      - "徐徐"
+      - "蓦然"
+      - "骤然"
+      - "悄然"
+      - "默然"
+    threshold: 5
+    max_score: 12
+    evidence_mode: "count"
+
+  - dimension: "风格匹配度"
+    category: "style_matching"
+    rule_id: "S10"
+    name: "动作描写生动"
+    description: "动作描写生动 (≥5处)"
+    keywords:
+      - "挥"
+      - "抬"
+      - "踏"
+      - "迈"
+      - "伸"
+      - "握"
+      - "抓"
+      - "冲"
+      - "跃"
+      - "飞"
+      - "跑"
+      - "走"
+    threshold: 5
+    max_score: 12
+    evidence_mode: "count"
+
+  - dimension: "风格匹配度"
+    category: "style_matching"
+    rule_id: "S11"
+    name: "对话占比适中"
+    description: "对话占比适中 (非流水账)"
+    keywords:
+      - '"'
+      - '"'
+      - '"'
+      - '"'
+      - "说"
+      - "道"
+    threshold: 0  # 使用ratio模式判断
+    max_score: 12
+    evidence_mode: "dialogue_ratio"
+
+  - dimension: "风格匹配度"
+    category: "style_matching"
+    rule_id: "S12"
+    name: "无口语/网络用语滥用"
+    description: "无口语化/网络用语滥用 (≤3处)"
+    keywords:
+      - "哈哈哈"
+      - "呵呵"
+      - "嘿嘿"
+      - "么么哒"
+      - "666"
+      - "yyds"
+      - "绝绝子"
+      - "针不戳"
+    threshold: 4  # ≤3处为通过
+    max_score: 12
+    evidence_mode: "count_inverse"
+
+
+  # =============================================
+  # 维度5: 世界观一致性 (10条规则, 权重10%)
+  # =============================================
+  - dimension: "世界观一致性"
+    category: "world_consistency"
+    rule_id: "W1"
+    name: "世界观设定丰富"
+    description: "世界观设定词丰富 (≥10处)"
+    keywords:
+      - "世界"
+      - "大陆"
+      - "帝国"
+      - "王朝"
+      - "宗门"
+      - "门派"
+      - "家族"
+      - "势力"
+      - "境界"
+      - "修为"
+      - "法则"
+      - "规则"
+      - "力量"
+      - "位面"
+      - "空间"
+    threshold: 10
+    max_score: 10
+    evidence_mode: "count"
+
+  - dimension: "世界观一致性"
+    category: "world_consistency"
+    rule_id: "W2"
+    name: "地理设定明确"
+    description: "地理/空间设定明确 (≥10处)"
+    keywords:
+      - "城"
+      - "镇"
+      - "村"
+      - "山"
+      - "河"
+      - "海"
+      - "湖"
+      - "森"
+      - "林"
+      - "沙漠"
+      - "草原"
+    threshold: 10
+    max_score: 10
+    evidence_mode: "count"
+
+  - dimension: "世界观一致性"
+    category: "world_consistency"
+    rule_id: "W3"
+    name: "力量体系存在"
+    description: "力量体系/修为等级存在 (≥3处)"
+    keywords:
+      - "境界"
+      - "修为"
+      - "等级"
+      - "段位"
+      - "层次"
+      - "级别"
+      - "品阶"
+      - "实力"
+      - "战力"
+      - "能力"
+    threshold: 3
+    max_score: 10
+    evidence_mode: "count"
+
+  - dimension: "世界观一致性"
+    category: "world_consistency"
+    rule_id: "W4"
+    name: "社会结构设定"
+    description: "社会结构/阶层设定 (≥3处)"
+    keywords:
+      - "贵族"
+      - "平民"
+      - "皇族"
+      - "皇室"
+      - "世家"
+      - "宗门"
+      - "门派"
+      - "帮派"
+      - "势力"
+    threshold: 3
+    max_score: 10
+    evidence_mode: "count"
+
+  - dimension: "世界观一致性"
+    category: "world_consistency"
+    rule_id: "W5"
+    name: "货币/经济体系存在"
+    description: "货币/经济体系存在 (≥2处)"
+    keywords:
+      - "金币"
+      - "银币"
+      - "灵石"
+      - "晶石"
+      - "银两"
+      - "铜钱"
+      - "元宝"
+      - "货币"
+      - "金钱"
+      - "财富"
+    threshold: 2
+    max_score: 10
+    evidence_mode: "count"
+
+  - dimension: "世界观一致性"
+    category: "world_consistency"
+    rule_id: "W6"
+    name: "时间背景设定明确"
+    description: "时间背景/时代设定明确 (≥2处)"
+    keywords:
+      - "时代"
+      - "古代"
+      - "现代"
+      - "近代"
+      - "远古"
+      - "上古"
+      - "太古"
+      - "纪元"
+      - "历法"
+      - "年间"
+    threshold: 2
+    max_score: 10
+    evidence_mode: "count"
+
+  - dimension: "世界观一致性"
+    category: "world_consistency"
+    rule_id: "W7"
+    name: "世界观设定无矛盾"
+    description: "世界观设定无矛盾"
+    keywords:
+      - "自相矛盾"
+      - "前后矛盾"
+      - "设定冲突"
+    threshold: 1
+    max_score: 10
+    evidence_mode: "count_inverse"
+
+  - dimension: "世界观一致性"
+    category: "world_consistency"
+    rule_id: "W8"
+    name: "力量体系有递进"
+    description: "力量体系有递进 (≥3处)"
+    keywords:
+      - "初期"
+      - "中期"
+      - "后期"
+      - "巅峰"
+      - "圆满"
+      - "大成"
+      - "小成"
+    threshold: 3
+    max_score: 10
+    evidence_mode: "count"
+
+  - dimension: "世界观一致性"
+    category: "world_consistency"
+    rule_id: "W9"
+    name: "地名有体系"
+    description: "地理名称有体系 (≥5处)"
+    keywords:
+      - "东"
+      - "西"
+      - "南"
+      - "北"
+      - "中"
+      - "城"
+      - "郡"
+      - "州"
+      - "府"
+      - "县"
+    threshold: 5
+    max_score: 10
+    evidence_mode: "count"
+
+  - dimension: "世界观一致性"
+    category: "world_consistency"
+    rule_id: "W10"
+    name: "世界规则有说明"
+    description: "世界规则/法则有说明 (≥2处)"
+    keywords:
+      - "法则"
+      - "规则"
+      - "天道"
+      - "天命"
+      - "因果"
+      - "轮回"
+      - "气运"
+      - "命运"
+      - "大道"
+    threshold: 2
+    max_score: 10
+    evidence_mode: "count"
+
+
+  # =============================================
+  # 维度6: 叙事流畅度 (10条规则, 权重10%)
+  # =============================================
+  - dimension: "叙事流畅度"
+    category: "narrative_flow"
+    rule_id: "N1"
+    name: "过渡词丰富"
+    description: "过渡词丰富 (≥8处)"
+    keywords:
+      - "然后"
+      - "接着"
+      - "随后"
+      - "之后"
+      - "于是"
+      - "这时"
+      - "此时"
+      - "此刻"
+      - "接下来"
+      - "接下来"
+      - "不一会儿"
+      - "片刻"
+    threshold: 8
+    max_score: 10
+    evidence_mode: "count"
+
+  - dimension: "叙事流畅度"
+    category: "narrative_flow"
+    rule_id: "N2"
+    name: "段落长度适中"
+    description: "段落长度适中 (≥60%在30-300字)"
+    keywords:
+      - "。"  # 句号作为段落分隔
+    threshold: 60  # 60%的段落符合要求
+    max_score: 10
+    evidence_mode: "para_length"
+
+  - dimension: "叙事流畅度"
+    category: "narrative_flow"
+    rule_id: "N3"
+    name: "场景切换有提示"
+    description: "场景切换有提示 (≥2处)"
+    keywords:
+      - "与此同时"
+      - "另一边"
+      - "画面一转"
+      - "镜头一转"
+      - "视角一转"
+      - "场景转换"
+      - "画面切换"
+    threshold: 2
+    max_score: 10
+    evidence_mode: "count"
+
+  - dimension: "叙事流畅度"
+    category: "narrative_flow"
+    rule_id: "N4"
+    name: "无长句式重复"
+    description: "无长时间单一句式重复"
+    keywords:
+      - "的"
+      - "了"
+      - "是"
+      - "在"
+    threshold: 1
+    max_score: 10
+    evidence_mode: "repeat_check"
+
+  - dimension: "叙事流畅度"
+    category: "narrative_flow"
+    rule_id: "N5"
+    name: "叙事视角稳定"
+    description: "叙事视角稳定 (主导视角≥50%)"
+    keywords:
+      - "他"
+      - "她"
+      - "它"
+    threshold: 50  # 主导视角占比≥50%
+    max_score: 10
+    evidence_mode: "perspective"
+
+  - dimension: "叙事流畅度"
+    category: "narrative_flow"
+    rule_id: "N6"
+    name: "节奏有张弛"
+    description: "节奏有张弛 (紧张和放松场景并存)"
+    keywords:
+      - "紧张"
+      - "急促"
+      - "紧迫"
+      - "危机"
+      - "放松"
+      - "平静"
+      - "休息"
+      - "闲"
+      - "慢"
+    threshold: 2  # 两种情绪词各≥2
+    max_score: 10
+    evidence_mode: "tension"
+
+  - dimension: "叙事流畅度"
+    category: "narrative_flow"
+    rule_id: "N7"
+    name: "章节内部连贯"
+    description: "章节内部连贯 (≥3处)"
+    keywords:
+      - "说到"
+      - "接着说"
+      - "回到"
+      - "继续说"
+      - "却说"
+    threshold: 3
+    max_score: 10
+    evidence_mode: "count"
+
+  - dimension: "叙事流畅度"
+    category: "narrative_flow"
+    rule_id: "N8"
+    name: "信息铺垫充分"
+    description: "信息铺垫充分 (≥5处)"
+    keywords:
+      - "之前"
+      - "先前"
+      - "早就"
+      - "早已"
+      - "之前提到"
+    threshold: 5
+    max_score: 10
+    evidence_mode: "count"
+
+  - dimension: "叙事流畅度"
+    category: "narrative_flow"
+    rule_id: "N9"
+    name: "叙述顺序明确"
+    description: "叙述顺序合理 (≥3处)"
+    keywords:
+      - "回忆"
+      - "想起"
+      - "记得"
+      - "当年"
+      - "过去"
+    threshold: 3
+    max_score: 10
+    evidence_mode: "count"
+
+  - dimension: "叙事流畅度"
+    category: "narrative_flow"
+    rule_id: "N10"
+    name: "无叙事断层"
+    description: "无叙事断层/跳跃 (突兀开头≤3处)"
+    keywords:
+      - "\n然后"
+      - "\n接着"
+      - "\n于是"
+    threshold: 4  # ≤3处为通过
+    max_score: 10
+    evidence_mode: "count_inverse"
+
+
+  # =============================================
+  # 维度7: 情感冲击力 (10条规则, 权重5%)
+  # =============================================
+  - dimension: "情感冲击力"
+    category: "emotional_impact"
+    rule_id: "E1"
+    name: "情感词汇丰富"
+    description: "情感词汇丰富 (≥10处)"
+    keywords:
+      - "感动"
+      - "震撼"
+      - "愤怒"
+      - "悲伤"
+      - "恐惧"
+      - "喜悦"
+      - "激动"
+      - "心疼"
+      - "热血"
+      - "泪"
+      - "哭"
+      - "笑"
+      - "怒"
+      - "惊"
+      - "恐"
+    threshold: 10
+    max_score: 10
+    evidence_mode: "count"
+
+  - dimension: "情感冲击力"
+    category: "emotional_impact"
+    rule_id: "E2"
+    name: "感叹句恰当"
+    description: "感叹句使用恰当 (≥5处)"
+    keywords:
+      - "！"
+    threshold: 5
+    max_score: 10
+    evidence_mode: "count"
+
+  - dimension: "情感冲击力"
+    category: "emotional_impact"
+    rule_id: "E3"
+    name: "有情感高潮场景"
+    description: "有情感高潮场景"
+    keywords:
+      - "热泪盈眶"
+      - "痛哭"
+      - "嚎啕"
+      - "激动"
+      - "震撼"
+      - "震惊"
+      - "崩溃"
+      - "绝望"
+      - "狂喜"
+      - "癫狂"
+    threshold: 1
+    max_score: 10
+    evidence_mode: "count"
+
+  - dimension: "情感冲击力"
+    category: "emotional_impact"
+    rule_id: "E4"
+    name: "有细腻情感描写"
+    description: "有细腻情感描写 (≥3处)"
+    keywords:
+      - "心酸"
+      - "苦涩"
+      - "酸涩"
+      - "微酸"
+      - "微苦"
+      - "隐隐"
+      - "微微"
+      - "淡淡"
+    threshold: 3
+    max_score: 10
+    evidence_mode: "count"
+
+  - dimension: "情感冲击力"
+    category: "emotional_impact"
+    rule_id: "E5"
+    name: "情感变化有层次"
+    description: "情感变化有层次 (≥3处)"
+    keywords:
+      - "先是"
+      - "接着"
+      - "随后"
+      - "然后"
+      - "最后"
+      - "渐渐"
+      - "慢慢"
+      - "逐渐"
+      - "日益"
+      - "越来越"
+    threshold: 3
+    max_score: 10
+    evidence_mode: "count"
+
+  - dimension: "情感冲击力"
+    category: "emotional_impact"
+    rule_id: "E6"
+    name: "能引发读者共情"
+    description: "能引发读者共情 (≥3处)"
+    keywords:
+      - "不禁"
+      - "不由得"
+      - "不由"
+      - "忍不住"
+      - "难以"
+      - "无法"
+    threshold: 3
+    max_score: 10
+    evidence_mode: "count"
+
+  - dimension: "情感冲击力"
+    category: "emotional_impact"
+    rule_id: "E7"
+    name: "情感表达有节制"
+    description: "情感表达有节制 (不过于煽情 ≤3处)"
+    keywords:
+      - "哭得"
+      - "哭得稀里哗啦"
+      - "哭成泪人"
+      - "哭天抢地"
+    threshold: 4  # ≤3处为通过
+    max_score: 10
+    evidence_mode: "count_inverse"
+
+  - dimension: "情感冲击力"
+    category: "emotional_impact"
+    rule_id: "E8"
+    name: "有情感留白"
+    description: "有留白/情感余韵 (≥2处)"
+    keywords:
+      - "没有说话"
+      - "沉默"
+      - "无言"
+      - "说不出口"
+      - "欲言又止"
+    threshold: 2
+    max_score: 10
+    evidence_mode: "count"
+
+  - dimension: "情感冲击力"
+    category: "emotional_impact"
+    rule_id: "E9"
+    name: "对话有情感张力"
+    description: "对话有情感张力 (≥5处)"
+    keywords:
+      - "道"
+      - "说"
+      - "喊"
+      - "吼"
+      - "咆哮"
+      - "低吼"
+      - "呢喃"
+    threshold: 5
+    max_score: 10
+    evidence_mode: "count"
+
+  - dimension: "情感冲击力"
+    category: "emotional_impact"
+    rule_id: "E10"
+    name: "有催泪/燃点场景"
+    description: "有催泪/燃点场景 (≥2处)"
+    keywords:
+      - "牺牲"
+      - "离别"
+      - "永别"
+      - "诀别"
+      - "死亡"
+      - "逝去"
+      - "倒下"
+      - "化为"
+      - "消散"
+      - "消失"
+    threshold: 2
+    max_score: 10
+    evidence_mode: "count"
+
+
+  # =============================================
+  # 维度8: 钩子强度 (12条规则, 权重5%)
+  # =============================================
+  - dimension: "钩子强度"
+    category: "hook_strength"
+    rule_id: "H1"
+    name: "开篇有强吸引钩子"
+    description: "开篇有强吸引钩子 (前500字)"
+    keywords:
+      - "突然"
+      - "就在"
+      - "蓦然"
+      - "忽然"
+      - "就在这时"
+      - "刹那间"
+      - "一瞬间"
+      - "骤然"
+    threshold: 1
+    max_score: 12
+    evidence_mode: "opening"
+
+  - dimension: "钩子强度"
+    category: "hook_strength"
+    rule_id: "H2"
+    name: "开篇有悬念疑问"
+    description: "开篇有悬念/疑问 (前500字)"
+    keywords:
+      - "？"
+      - "？"
+      - "怎么"
+      - "如何"
+      - "为什么"
+      - "难道"
+      - "是否"
+    threshold: 1
+    max_score: 12
+    evidence_mode: "opening"
+
+  - dimension: "钩子强度"
+    category: "hook_strength"
+    rule_id: "H3"
+    name: "主角开篇即面临困境"
+    description: "主角开篇即面临困境/挑战 (前500字)"
+    keywords:
+      - "危机"
+      - "困境"
+      - "面临"
+      - "面对"
+      - "遭遇"
+    threshold: 1
+    max_score: 12
+    evidence_mode: "opening"
+
+  - dimension: "钩子强度"
+    category: "hook_strength"
+    rule_id: "H4"
+    name: "有未解之谜"
+    description: "有未解之谜吸引读者 (≥5处)"
+    keywords:
+      - "？"
+      - "？"
+      - "谜"
+      - "秘密"
+      - "神秘"
+      - "未知"
+      - "悬念"
+      - "疑问"
+    threshold: 5
+    max_score: 12
+    evidence_mode: "count"
+
+  - dimension: "钩子强度"
+    category: "hook_strength"
+    rule_id: "H5"
+    name: "有利益冲突驱动"
+    description: "有利益冲突驱动 (≥3处)"
+    keywords:
+      - "利益"
+      - "争夺"
+      - "竞争"
+      - "对决"
+      - "赌注"
+      - "筹码"
+      - "威胁"
+      - "压迫"
+    threshold: 3
+    max_score: 12
+    evidence_mode: "count"
+
+  - dimension: "钩子强度"
+    category: "hook_strength"
+    rule_id: "H6"
+    name: "章节结尾有悬念"
+    description: "章节结尾有悬念 (后300字)"
+    keywords:
+      - "请"
+      - "待续"
+      - "敬请"
+      - "未完"
+      - "未知"
+      - "悬"
+      - "下回"
+    threshold: 1
+    max_score: 12
+    evidence_mode: "ending"
+
+  - dimension: "钩子强度"
+    category: "hook_strength"
+    rule_id: "H7"
+    name: "有信息差驱动"
+    description: "有信息差/信息不对称 (≥5处)"
+    keywords:
+      - "不知道"
+      - "不清楚"
+      - "不明白"
+      - "不知"
+      - "不明"
+      - "未知"
+    threshold: 5
+    max_score: 12
+    evidence_mode: "count"
+
+  - dimension: "钩子强度"
+    category: "hook_strength"
+    rule_id: "H8"
+    name: "有强烈目标展现"
+    description: "有强烈欲望/目标的展现 (≥3处)"
+    keywords:
+      - "渴望"
+      - "追求"
+      - "想要"
+      - "希望"
+      - "梦想"
+      - "心愿"
+      - "执念"
+    threshold: 3
+    max_score: 12
+    evidence_mode: "count"
+
+  - dimension: "钩子强度"
+    category: "hook_strength"
+    rule_id: "H9"
+    name: "有威胁/紧迫感"
+    description: "有威胁/紧迫感 (≥3处)"
+    keywords:
+      - "必须"
+      - "不得不"
+      - "紧迫"
+      - "紧急"
+      - "时限"
+      - "倒计时"
+      - "最后"
+      - "期限"
+    threshold: 3
+    max_score: 12
+    evidence_mode: "count"
+
+  - dimension: "钩子强度"
+    category: "hook_strength"
+    rule_id: "H10"
+    name: "有反差/意外元素"
+    description: "有反差/意外元素 (≥3处)"
+    keywords:
+      - "没想到"
+      - "出乎意料"
+      - "谁知"
+      - "却不料"
+      - "竟然"
+      - "居然"
+      - "万万没想到"
+      - "令人意外"
+    threshold: 3
+    max_score: 12
+    evidence_mode: "count"
+
+  - dimension: "钩子强度"
+    category: "hook_strength"
+    rule_id: "H11"
+    name: "有升级/成长期待"
+    description: "有升级/成长期待 (≥3处)"
+    keywords:
+      - "即将"
+      - "马上"
+      - "很快"
+      - "即将突破"
+      - "即将提升"
+      - "即将领悟"
+    threshold: 3
+    max_score: 12
+    evidence_mode: "count"
+
+  - dimension: "钩子强度"
+    category: "hook_strength"
+    rule_id: "H12"
+    name: "有社交/关系冲突"
+    description: "有社交/关系冲突 (≥3处)"
+    keywords:
+      - "误会"
+      - "误解"
+      - "隔阂"
+      - "矛盾"
+      - "对立"
+      - "敌对"
+      - "仇恨"
+      - "恩怨"
+    threshold: 3
+    max_score: 12
+    evidence_mode: "count"
