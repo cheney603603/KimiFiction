@@ -111,3 +111,63 @@ async def get_character_timeline(
     if timeline is None:
         raise HTTPException(status_code=404, detail="角色不存在")
     return timeline
+
+
+@router.get("/novel/{novel_id}/relationships")
+async def get_character_relationships(
+    novel_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    获取角色关系图谱数据
+    返回节点和边的数据，用于可视化
+    """
+    service = CharacterService(db)
+    characters = await service.list_characters(novel_id)
+    
+    # 构建节点和边
+    nodes = []
+    edges = []
+    role_colors = {
+        "protagonist": "#F59E0B",  # 黄色 - 主角
+        "antagonist": "#EF4444",   # 红色 - 反派
+        "supporting": "#3B82F6",   # 蓝色 - 配角
+        "minor": "#6B7280",        # 灰色 - 龙套
+    }
+    
+    # 创建节点
+    for char in characters:
+        nodes.append({
+            "id": str(char.id),
+            "name": char.name,
+            "role": char.role_type.value if char.role_type else "minor",
+            "color": role_colors.get(char.role_type.value if char.role_type else "minor", "#6B7280"),
+            "firstAppearance": char.first_appearance,
+            "profile": char.profile or {},
+        })
+        
+        # 从profile中提取关系
+        if char.profile and isinstance(char.profile, dict):
+            relationships = char.profile.get("relationships", {})
+            if isinstance(relationships, dict):
+                for target_name, relation_type in relationships.items():
+                    # 找到目标角色
+                    target = next((c for c in characters if c.name == target_name), None)
+                    if target:
+                        edges.append({
+                            "source": str(char.id),
+                            "target": str(target.id),
+                            "relation": relation_type,
+                        })
+    
+    return {
+        "nodes": nodes,
+        "edges": edges,
+        "stats": {
+            "total": len(nodes),
+            "protagonist": len([n for n in nodes if n["role"] == "protagonist"]),
+            "antagonist": len([n for n in nodes if n["role"] == "antagonist"]),
+            "supporting": len([n for n in nodes if n["role"] == "supporting"]),
+            "minor": len([n for n in nodes if n["role"] == "minor"]),
+        }
+    }

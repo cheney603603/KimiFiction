@@ -152,13 +152,26 @@ class LLMService:
     
     def _init_local_qwen_client(self, config: Dict[str, Any]):
         """初始化本地Qwen客户端（llama.cpp）"""
-        from app.core.local_llm import get_local_llm_service
+        from app.core.local_llm import create_local_llm_service, list_available_models
+        
+        # 获取模型配置
+        model_id = config.get("local_model_id", "qwen-2b")
+        n_ctx = config.get("local_n_ctx", 4096)
+        n_gpu_layers = config.get("local_n_gpu_layers", 0)
+        
+        # 检查可用模型
+        available_models = list_available_models()
+        logger.info(f"[LLMService] 可用本地模型: {list(available_models.keys())}")
         
         self.openai_client = None
         self.deepseek_client = None
         self.local_llama_client = None
-        self.local_qwen_client = get_local_llm_service()
-        logger.info(f"LLMService初始化: Local Qwen模式, model_path={self.local_qwen_client.config.model_path}")
+        self.local_qwen_client = create_local_llm_service(
+            model_id=model_id,
+            n_ctx=n_ctx,
+            n_gpu_layers=n_gpu_layers,
+        )
+        logger.info(f"LLMService初始化: Local Qwen模式, model_id={model_id}, model_path={self.local_qwen_client.config.model_path}")
     
     async def chat(
         self,

@@ -26,16 +26,16 @@ from app.agents.writer import ChapterWriterAgent
 from app.agents.reader import ReaderAgent
 from app.agents.base import BaseAgent
 
-# 导入GRPO训练器（统一入口：app.rl_training → app/training/）
-from app.rl_training import (
+# 导入GRPO训练器（统一入口：app.training）
+from app.training import (
     GRPOTrainer,
     GRPOConfig,
     WritingAction,
     Episode,
     TPOService,
 )
-# RTX 4070 优化配置
-from app.rl_training.config import RLTrainingConfig
+# 硬件优化配置
+from app.training.hardware_config import RTX4070Config, RLTrainingConfig, get_recommended_config
 
 
 @dataclass

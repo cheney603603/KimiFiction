@@ -159,6 +159,37 @@ async def export_outline(
         raise HTTPException(status_code=500, detail=f"导出失败: {str(e)}")
 
 
+@router.get("/novel/{novel_id}/epub")
+async def export_epub(
+    novel_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_auth)
+):
+    """导出小说为EPUB格式（电子书）"""
+    service = ExportService(db)
+    
+    try:
+        # 获取小说标题作为文件名
+        from app.services.novel_service import NovelService
+        novel_service = NovelService(db)
+        novel = await novel_service.get_novel(novel_id)
+        
+        # 导出EPUB
+        epub_path = await service.export_to_epub(novel_id)
+        
+        filename = f"{novel.title if novel else 'novel'}.epub"
+        
+        return FileResponse(
+            epub_path,
+            media_type="application/epub+zip",
+            headers={"Content-Disposition": f"attachment; filename={filename}"}
+        )
+    except ValueError as e:
+        raise HTTPException(status_code=404, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"EPUB导出失败: {str(e)}")
+
+
 @router.get("/reference/{filename}")
 async def get_reference_file(
     filename: str,

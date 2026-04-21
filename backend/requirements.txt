@@ -1,59 +1,61 @@
 # FastAPI 核心依赖
-fastapi==0.109.0
-uvicorn[standard]==0.27.0
-pydantic==2.5.3
-pydantic-settings==2.1.0
-email-validator==2.1.0
+fastapi>=0.109.0
+uvicorn[standard]>=0.27.0
+pydantic>=2.5.3
+pydantic-settings>=2.1.0
+email-validator>=2.1.0
 
 # 数据库依赖
-sqlalchemy==2.0.25
-aiomysql==0.2.0
-alembic==1.13.1
-redis==5.0.1
+sqlalchemy>=2.0.25
+aiomysql>=0.2.0
+alembic>=1.13.1
+redis>=5.0.1
 
 # 向量数据库
-qdrant-client==1.7.0
+qdrant-client>=1.7.0
 
 # LangChain / LangGraph 智能体框架
-langchain==0.1.0
-langchain-core==0.1.10
-langchain-community==0.0.12
-langchain-openai==0.0.2
-langgraph==0.0.20
+langchain>=0.1.0
+langchain-core>=0.1.10
+langchain-community>=0.0.12
+langchain-openai>=0.0.2
+langgraph>=0.0.20
 
 # HTTP 客户端
-httpx==0.26.0
-aiohttp==3.9.1
+httpx>=0.26.0
+aiohttp>=3.9.1
 
 # 工具库
-python-jose[cryptography]==3.3.0
-passlib[bcrypt]==1.7.4
-python-multipart==0.0.6
-python-dotenv==1.0.0
+python-jose[cryptography]>=3.3.0
+passlib[bcrypt]>=1.7.4
+python-multipart>=0.0.6
+python-dotenv>=1.0.0
 
 # 日志和监控
-loguru==0.7.2
+loguru>=0.7.2
 
 # ===== Agentic RL 相关依赖 =====
 
-# 本地LLM推理 (用于Qwen3.5-2B)
-llama-cpp-python==0.2.56
+# PyTorch 核心 (更新到2.8.0)
+torch==2.8.0
 
-# Embedding模型 (BGE-large-zh)
-sentence-transformers==2.5.1
-transformers==4.37.2
-torch==2.2.0
-accelerate==0.27.0
+# Transformers生态 (兼容PyTorch 2.8.0)
+transformers>=4.40.0
+sentence-transformers>=2.6.0
+accelerate>=0.28.0
 
-# LoRA微调
-peft==0.8.2
-bitsandbytes==0.42.0
-datasets==2.17.0
+# 本地LLM推理 (兼容PyTorch 2.8.0)
+llama-cpp-python>=0.2.56
+
+# LoRA微调 (兼容PyTorch 2.8.0)
+peft>=0.10.0
+bitsandbytes>=0.43.0
+datasets>=2.18.0
 
 # 数值计算
-numpy==1.26.4
-scipy==1.12.0
+numpy>=1.26.4
+scipy>=1.12.0
 
 # 测试
-pytest==7.4.4
-pytest-asyncio==0.23.3
+pytest>=7.4.4
+pytest-asyncio>=0.23.3

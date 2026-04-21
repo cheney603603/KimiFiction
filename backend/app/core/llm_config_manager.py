@@ -1,6 +1,11 @@
 """
 LLM配置管理器
 用于读取前端保存的LLM配置
+
+支持的LLM类型:
+1. API调用: openai, deepseek
+2. Chat2Api: kimi, yuanbao
+3. 本地模型: local_qwen (Qwen3.5-2B/35B)
 """
 import json
 import os
@@ -36,6 +41,11 @@ class LLMConfigManager:
             "base_url": "https://api.deepseek.com",
             "model": "deepseek-chat",
             "response_time": None,
+            # 本地模型配置
+            "local_model_id": "qwen-2b",  # qwen-2b 或 qwen-35b
+            "local_model_path": None,
+            "local_n_ctx": 4096,
+            "local_n_gpu_layers": 0,
         }
 
         # 从全局配置读取（前端通过API设置），最高优先级
@@ -152,6 +162,49 @@ class LLMConfigManager:
         """获取DeepSeek API Key"""
         config = LLMConfigManager.get_config()
         return config.get("api_key") or os.getenv("DEEPSEEK_API_KEY", "")
+
+    @staticmethod
+    def is_local_model_mode() -> bool:
+        """是否使用本地模型模式"""
+        provider = LLMConfigManager.get_provider()
+        return provider in ["local_qwen", "local_llama"]
+
+    @staticmethod
+    def get_local_model_config() -> Dict[str, Any]:
+        """
+        获取本地模型配置
+        
+        Returns:
+            本地模型配置字典
+        """
+        config = LLMConfigManager.get_config()
+        
+        return {
+            "model_id": config.get("local_model_id", "qwen-2b"),
+            "model_path": config.get("local_model_path"),
+            "n_ctx": config.get("local_n_ctx", 4096),
+            "n_gpu_layers": config.get("local_n_gpu_layers", 0),
+        }
+
+    @staticmethod
+    def set_local_model(model_id: str, n_ctx: int = None, n_gpu_layers: int = None):
+        """
+        设置本地模型
+        
+        Args:
+            model_id: 模型ID (qwen-2b, qwen-35b)
+            n_ctx: 上下文长度
+            n_gpu_layers: GPU层数
+        """
+        global _global_config
+        _global_config["provider"] = "local_qwen"
+        _global_config["local_model_id"] = model_id
+        if n_ctx:
+            _global_config["local_n_ctx"] = n_ctx
+        if n_gpu_layers is not None:
+            _global_config["local_n_gpu_layers"] = n_gpu_layers
+        
+        logger.info(f"本地模型配置已更新: model_id={model_id}, n_ctx={n_ctx}, n_gpu_layers={n_gpu_layers}")
 
 
 # 全局配置实例

@@ -1,8 +1,9 @@
 import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, User, Crown, Sword, Users, X, ArrowLeft, Sparkles, Edit, Save, Check, Trash2 } from 'lucide-react'
+import { Plus, User, Crown, Sword, Users, X, ArrowLeft, Sparkles, Edit, Save, Check, Trash2, Network } from 'lucide-react'
 import { characterApi, workflowApi } from '../services/api'
+import { RelationshipGraph } from '../components/RelationshipGraph'
 import type { Character } from '../types'
 
 const roleTypeMap: Record<string, { label: string; icon: typeof User; color: string }> = {
@@ -25,6 +26,7 @@ export function CharacterManager() {
     role_type: 'supporting',
     profile: {} as Record<string, unknown>,
   })
+  const [viewMode, setViewMode] = useState<'list' | 'graph'>('list')
 
   // 获取工作流的角色设计数据
   const { data: workflowCharacters } = useQuery({
@@ -177,15 +179,49 @@ export function CharacterManager() {
             </p>
           )}
         </div>
-        <button
-          onClick={() => setIsCreating(true)}
-          className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700"
-        >
-          <Plus className="h-5 w-5" />
-          添加角色
-        </button>
+        <div className="flex items-center gap-2">
+          {/* 视图切换 */}
+          <div className="flex bg-gray-100 dark:bg-gray-700 rounded-lg p-1">
+            <button
+              onClick={() => setViewMode('list')}
+              className={`flex items-center gap-1 px-3 py-1.5 rounded-md text-sm transition-colors ${
+                viewMode === 'list' 
+                  ? 'bg-white dark:bg-gray-600 shadow text-gray-900 dark:text-white' 
+                  : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
+              }`}
+            >
+              <Users className="h-4 w-4" />
+              列表
+            </button>
+            <button
+              onClick={() => setViewMode('graph')}
+              className={`flex items-center gap-1 px-3 py-1.5 rounded-md text-sm transition-colors ${
+                viewMode === 'graph' 
+                  ? 'bg-white dark:bg-gray-600 shadow text-gray-900 dark:text-white' 
+                  : 'text-gray-600 dark:text-gray-300 hover:text-gray-900 dark:hover:text-white'
+              }`}
+            >
+              <Network className="h-4 w-4" />
+              关系图
+            </button>
+          </div>
+          <button
+            onClick={() => setIsCreating(true)}
+            className="flex items-center gap-2 px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700"
+          >
+            <Plus className="h-5 w-5" />
+            添加角色
+          </button>
+        </div>
       </div>
 
+      {/* 关系图谱视图 */}
+      {viewMode === 'graph' ? (
+        <div className="mt-6">
+          <RelationshipGraph novelId={id} />
+        </div>
+      ) : (
+      <>
       {/* 角色卡片网格 */}
       {characters.length === 0 ? (
         <div className="text-center py-16 bg-white dark:bg-gray-800 rounded-xl border border-dashed border-gray-300 dark:border-gray-600">
@@ -793,6 +829,8 @@ export function CharacterManager() {
             </div>
           </div>
         </div>
+      )}
+      </>
       )}
     </div>
   )

@@ -5,9 +5,9 @@
 快速开始：
     from app.training import GRPOTrainer, LoRATrainer, ImitationLearning
 
-RTX 4070 (8GB) 优化配置：
-    from app.rl_training.config import RLTrainingConfig
-    config = RLTrainingConfig()
+硬件优化配置：
+    from app.training.hardware_config import RTX4070Config, get_recommended_config
+    config = RTX4070Config()
     config.summary()  # 打印显存占用估算
 
 完整训练 Pipeline：
@@ -41,6 +41,14 @@ from app.training.training_pipeline import (
     TrainingStageResult,
 )
 
+# 硬件配置
+from app.training.hardware_config import (
+    RTX4070Config,
+    RLTrainingConfig,  # 向后兼容
+    CPUOnlyConfig,
+    get_recommended_config,
+)
+
 __all__ = [
     # GRPO
     "GRPOTrainer",
@@ -63,4 +71,9 @@ __all__ = [
     "TrainingPipeline",
     "TrainingPipelineResult",
     "TrainingStageResult",
+    # 硬件配置
+    "RTX4070Config",
+    "RLTrainingConfig",
+    "CPUOnlyConfig",
+    "get_recommended_config",
 ]

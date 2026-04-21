@@ -3,8 +3,12 @@
 提供小说数据的导出功能（TXT、Markdown、EPUB等格式）
 """
 import json
+import zipfile
+import os
+import re
 from typing import List, Dict, Any, Optional
 from datetime import datetime
+from pathlib import Path
 from loguru import logger
 
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -362,3 +366,190 @@ class ExportService:
             lines.append("")
         
         return "\n".join(lines)
+
+    async def export_to_epub(self, novel_id: int, output_path: str = None) -> str:
+        """
+        导出为EPUB格式
+        
+        Args:
+            novel_id: 小说ID
+            output_path: 输出文件路径（可选，默认Temp目录）
+            
+        Returns:
+            EPUB文件路径
+        """
+        import tempfile
+        import shutil
+        
+        # 获取小说和章节数据
+        novel_result = await self.db.execute(
+            select(Novel).where(Novel.id == novel_id)
+        )
+        novel = novel_result.scalar_one_or_none()
+        
+        if not novel:
+            raise ValueError("小说不存在")
+        
+        chapters_result = await self.db.execute(
+            select(Chapter)
+            .where(Chapter.novel_id == novel_id)
+            .order_by(Chapter.chapter_number.asc())
+        )
+        chapters = chapters_result.scalars().all()
+        
+        # 创建临时目录
+        temp_dir = tempfile.mkdtemp()
+        epub_dir = Path(temp_dir) / "epub"
+        epub_dir.mkdir()
+        
+        (epub_dir / "META-INF").mkdir()
+        (epub_dir / "OEBPS").mkdir()
+        
+        # 清理小说标题中的非法字符
+        safe_title = re.sub(r'[<>:"/\\|?*]', '', novel.title)
+        
+        # 1. 创建 container.xml
+        container_xml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+    <rootfiles>
+        <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+    </rootfiles>
+</container>"""
+        (epub_dir / "META-INF" / "container.xml").write_text(container_xml, encoding="utf-8")
+        
+        # 2. 创建 NCX 目录文件
+        ncx_content = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE ncx PUBLIC "-//NISO//DTD ncx 2005-1//EN" "http://www.daisy.org/z3986/2005/ncx-2005-1.dtd">
+<ncx xmlns="http://www.daisy.org/z3986/2005/ncx/" version="2005-1">
+    <head>
+        <meta name="dtb:uid" content="novel_{novel_id}"/>
+        <meta name="dtb:depth" content="1"/>
+        <meta name="dtb:totalPageCount" content="0"/>
+        <meta name="dtb:maxPageNumber" content="0"/>
+    </head>
+    <docTitle>
+        <text>{safe_title}</text>
+    </docTitle>
+    <navMap>
+"""
+        
+        chapter_items = []
+        for i, ch in enumerate(chapters):
+            ncx_content += f"""        <navPoint id="navPoint-{i+1}" playOrder="{i+1}">
+            <navLabel>
+                <text>第{ch.chapter_number}章 {ch.title}</text>
+            </navLabel>
+            <content src="chapter_{ch.chapter_number}.xhtml"/>
+        </navPoint>
+"""
+            chapter_items.append(f'<item id="chapter_{ch.chapter_number}" href="chapter_{ch.chapter_number}.xhtml" media-type="application/xhtml+xml"/>')
+        
+        ncx_content += """    </navMap>
+</ncx>"""
+        
+        # 3. 创建 content.opf
+        opf_content = f"""<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="2.0" unique-identifier="bookid">
+    <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+        <dc:title>{safe_title}</dc:title>
+        <dc:language>zh-CN</dc:language>
+        <dc:creator>KimiFiction</dc:creator>
+        <dc:identifier id="bookid" opf:scheme="UUID">novel_{novel_id}</dc:identifier>
+        <dc:description>由KimiFiction生成的小说</dc:description>
+        <meta name="generator" content="KimiFiction"/>
+    </metadata>
+    <manifest>
+        <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+        <item id="nav" href="toc.xhtml" media-type="application/xhtml+xml"/>
+"""
+        opf_content += "\n".join(f"        {item}" for item in chapter_items)
+        opf_content += """
+    </metadata>
+    <spine toc="ncx">
+"""
+        
+        for i, ch in enumerate(chapters):
+            opf_content += f'        <itemref idref="chapter_{ch.chapter_number}"/>\n'
+        
+        opf_content += """    </spine>
+</package>"""
+        
+        (epub_dir / "OEBPS" / "content.opf").write_text(opf_content, encoding="utf-8")
+        (epub_dir / "OEBPS" / "toc.ncx").write_text(ncx_content, encoding="utf-8")
+        
+        # 4. 创建导航文件 (toc.xhtml)
+        toc_xhtml = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+    <title>目录</title>
+    <style>
+        body {{ font-family: "SimSun", serif; margin: 5%; }}
+        h1 {{ text-align: center; margin-bottom: 1em; }}
+        ul {{ list-style-type: none; padding: 0; }}
+        li {{ margin: 0.5em 0; }}
+        a {{ text-decoration: none; color: #333; }}
+    </style>
+</head>
+<body>
+    <h1>目录</h1>
+    <ul>
+"""
+        for ch in chapters:
+            toc_xhtml += f'        <li><a href="chapter_{ch.chapter_number}.xhtml">第{ch.chapter_number}章 {ch.title}</a></li>\n'
+        
+        toc_xhtml += """    </ul>
+</body>
+</html>"""
+        (epub_dir / "OEBPS" / "toc.xhtml").write_text(toc_xhtml, encoding="utf-8")
+        
+        # 5. 创建各章节HTML
+        for ch in chapters:
+            chapter_html = f"""<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE html PUBLIC "-//W3C//DTD XHTML 1.1//EN" "http://www.w3.org/TR/xhtml11/DTD/xhtml11.dtd">
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head>
+    <title>第{ch.chapter_number}章 {ch.title}</title>
+    <style>
+        body {{ font-family: "SimSun", serif; margin: 5%; line-height: 1.6; }}
+        h2 {{ text-align: center; margin-bottom: 1em; }}
+        p {{ text-indent: 2em; margin: 0.5em 0; }}
+    </style>
+</head>
+<body>
+    <h2>第{ch.chapter_number}章 {ch.title}</h2>
+"""
+            
+            # 将内容转换为HTML段落
+            paragraphs = ch.content.split('\n')
+            for p in paragraphs:
+                if p.strip():
+                    # 转义HTML特殊字符
+                    p = p.replace('&', '&amp;').replace('<', '&lt;').replace('>', '&gt;')
+                    chapter_html += f"    <p>{p}</p>\n"
+            
+            chapter_html += """</body>
+</html>"""
+            (epub_dir / "OEBPS" / f"chapter_{ch.chapter_number}.xhtml").write_text(chapter_html, encoding="utf-8")
+        
+        # 6. 打包成EPUB
+        if output_path is None:
+            output_path = Path(tempfile.gettempdir()) / f"{safe_title}.epub"
+        
+        output_path = Path(output_path)
+        
+        with zipfile.ZipFile(output_path, 'w', zipfile.ZIP_DEFLATED) as epub_zip:
+            # 添加container.xml
+            epub_zip.write(epub_dir / "META-INF" / "container.xml", "META-INF/container.xml")
+            
+            # 添加OEBPS内容
+            for file_path in (epub_dir / "OEBPS").rglob("*"):
+                if file_path.is_file():
+                    arcname = "OEBPS/" + file_path.name
+                    epub_zip.write(file_path, arcname)
+        
+        # 清理临时目录
+        shutil.rmtree(temp_dir)
+        
+        logger.info(f"EPUB导出完成: {output_path}")
+        return str(output_path)

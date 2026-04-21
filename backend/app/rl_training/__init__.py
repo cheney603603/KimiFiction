@@ -1,42 +1,49 @@
 """
-RL 训练系统 - 统一入口
-========================
-本模块整合了两套实现：
-- app/training/   → 完整 GRPO 算法（Policy/Episode 架构，推荐使用）
-- rl_training_archive/ → RTX 4070 硬件优化配置（旧版，保留兼容）
+RL 训练系统 - 统一入口（兼容层）
+================================
 
-推荐导入路径：
-    from app.rl_training import GRPOTrainer, RLTrainingConfig, RLWritingModel
+本模块是 app/training/ 的重导出层，保持向后兼容。
 
-向后兼容（旧路径仍可用）：
-    from app.rl_training import GRPOTrainer as OldGRPOTrainer  # 来自 rl_training_archive
+推荐导入路径（新）：
+    from app.training import GRPOTrainer, LoRATrainer, ImitationLearning
+    from app.training.hardware_config import RTX4070Config, get_recommended_config
+
+兼容导入路径（旧）：
+    from app.rl_training import GRPOTrainer, RLTrainingConfig
 """
 
-# ============================================================
-# 优先使用 app/training/ 中的完整实现
-# ============================================================
-from app.training.grpo_trainer import (
-    GRPOTrainer as _CanonicalGRPOTrainer,
+# 重导出 training 模块的所有内容
+from app.training import (
+    # GRPO
+    GRPOTrainer,
     GRPOConfig,
     GRPOPolicy,
     RewardFunction,
     GroupRewardNormalizer,
     WritingAction,
     Episode,
-)
-from app.training.lora_trainer import (
+    # LoRA
     LoRATrainer,
     LoRAConfig,
-)
-from app.training.tpo_service import (
+    # 模仿学习
+    ImitationLearning,
+    # TPO
     TPOService,
     RewardModel,
     TestTimeRL,
+    # Pipeline
+    TrainingPipeline,
+    TrainingPipelineResult,
+    TrainingStageResult,
 )
-from app.training.imitation_learning import ImitationLearning
 
-# 主入口：使用 app/training 中的完整实现
-GRPOTrainer = _CanonicalGRPOTrainer
+# 硬件配置
+from app.training.hardware_config import (
+    RTX4070Config,
+    RLTrainingConfig,  # 向后兼容别名
+    CPUOnlyConfig,
+    get_recommended_config,
+)
 
 __all__ = [
     # GRPO 核心
@@ -50,15 +57,19 @@ __all__ = [
     # LoRA
     "LoRATrainer",
     "LoRAConfig",
+    # 模仿学习
+    "ImitationLearning",
     # TPO
     "TPOService",
     "RewardModel",
     "TestTimeRL",
-    # 模仿学习
-    "ImitationLearning",
+    # Pipeline
+    "TrainingPipeline",
+    "TrainingPipelineResult",
+    "TrainingStageResult",
+    # 硬件配置
+    "RTX4070Config",
+    "RLTrainingConfig",
+    "CPUOnlyConfig",
+    "get_recommended_config",
 ]
-
-# ============================================================
-# RTX 4070 硬件优化配置
-# 使用方式：from app.rl_training.config import RLTrainingConfig
-# ============================================================

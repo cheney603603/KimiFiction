@@ -1,21 +1,45 @@
 """
-本地LLM服务 - 支持Qwen3.5-2B-Q4_K_M.gguf模型
+本地LLM服务 - 支持Qwen系列模型
 
 使用llama-cpp-python加载本地GGUF格式模型，
 支持LoRA适配器加载，适用于消费级显卡。
+
+支持的模型:
+- Qwen3.5-2B-Q4_K_M.gguf (1.2GB) - 轻量级，适合快速推理
+- Qwen3.5-35B-A3B-UD-Q4_K_XL.gguf (20.7GB) - 高质量，需要更多内存
 """
 import os
 import json
 from typing import Optional, List, Dict, Any, AsyncGenerator
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from loguru import logger
+
+
+# 预定义模型配置
+PREDEFINED_MODELS = {
+    "qwen-2b": {
+        "name": "Qwen3.5-2B-Q4_K_M",
+        "path": "D:/002 llm ware/models/Qwen3.5-2B-Q4_K_M.gguf",
+        "n_ctx": 4096,
+        "n_gpu_layers": 0,  # CPU only
+        "description": "轻量级模型，适合快速推理",
+    },
+    "qwen-35b": {
+        "name": "Qwen3.5-35B-A3B",
+        "path": "D:/002 llm ware/models/Qwen3.5-35B-A3B-UD-Q4_K_XL.gguf",
+        "n_ctx": 8192,
+        "n_gpu_layers": 0,  # 需要大量GPU内存，默认CPU
+        "description": "高质量模型，需要20GB+内存",
+    },
+}
 
 
 @dataclass
 class LocalLLMConfig:
     """本地LLM配置"""
-    model_path: str = "models/Qwen3.5-2B-Q4_K_M.gguf"
+    model_path: str = "D:/002 llm ware/models/Qwen3.5-2B-Q4_K_M.gguf"
+    model_name: str = "qwen-2b"
     n_ctx: int = 4096              # 上下文长度
     n_threads: Optional[int] = None  # 线程数（默认自动）
     n_batch: int = 512            # 批处理大小
@@ -362,3 +386,72 @@ async def check_local_model() -> Dict[str, Any]:
             "available": False,
             "error": str(e)
         }
+
+
+def list_available_models() -> Dict[str, Dict[str, Any]]:
+    """
+    列出所有可用的预定义模型
+    
+    Returns:
+        模型配置字典
+    """
+    available = {}
+    
+    for model_id, config in PREDEFINED_MODELS.items():
+        model_path = Path(config["path"])
+        available[model_id] = {
+            **config,
+            "exists": model_path.exists(),
+            "size_gb": model_path.stat().st_size / (1024**3) if model_path.exists() else 0,
+        }
+    
+    return available
+
+
+def get_model_config(model_id: str) -> Optional[LocalLLMConfig]:
+    """
+    根据模型ID获取配置
+    
+    Args:
+        model_id: 模型ID (qwen-2b, qwen-35b)
+        
+    Returns:
+        LocalLLMConfig配置对象
+    """
+    if model_id not in PREDEFINED_MODELS:
+        logger.warning(f"未知的模型ID: {model_id}")
+        return None
+    
+    model_info = PREDEFINED_MODELS[model_id]
+    
+    return LocalLLMConfig(
+        model_path=model_info["path"],
+        model_name=model_id,
+        n_ctx=model_info.get("n_ctx", 4096),
+        n_gpu_layers=model_info.get("n_gpu_layers", 0),
+    )
+
+
+def create_local_llm_service(model_id: str = "qwen-2b", **kwargs) -> LocalLLMService:
+    """
+    根据模型ID创建本地LLM服务
+    
+    Args:
+        model_id: 模型ID (qwen-2b, qwen-35b)
+        **kwargs: 额外配置参数
+        
+    Returns:
+        LocalLLMService实例
+    """
+    config = get_model_config(model_id)
+    
+    if config is None:
+        # 使用默认配置
+        config = LocalLLMConfig(**kwargs)
+    
+    # 应用额外参数
+    for key, value in kwargs.items():
+        if hasattr(config, key):
+            setattr(config, key, value)
+    
+    return LocalLLMService(config)
