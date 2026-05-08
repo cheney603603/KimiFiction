@@ -5,6 +5,7 @@ import { NovelDetail } from './pages/NovelDetail'
 import { ChapterReader } from './pages/ChapterReader'
 import { ChapterWriter } from './pages/ChapterWriter'
 import { CharacterManager } from './pages/CharacterManager'
+import { EntityManager } from './pages/EntityManager'
 import { OutlineEditor } from './pages/OutlineEditor'
 import { WorkflowChat } from './pages/WorkflowChat'
 import { WorkflowPage } from './pages/WorkflowPage'
@@ -16,6 +17,8 @@ import { AgentWorkflow } from './pages/AgentWorkflow'
 import { TrainingDashboard } from './pages/TrainingDashboard'
 import { RLVisualization } from './pages/RLVisualization'
 import { Evaluation } from './pages/Evaluation'
+import EvaluationOptimizer from './pages/EvaluationOptimizer'
+import SnapshotsPage from './pages/SnapshotsPage'
 
 // 检查是否已登录
 const isAuthenticated = () => {
@@ -51,6 +54,7 @@ function App() {
         <Route path="novel/:novelId/read/:chapterNumber?" element={<ChapterReader />} />
         <Route path="novel/:novelId/write" element={<ChapterWriter />} />
         <Route path="novel/:novelId/characters" element={<CharacterManager />} />
+        <Route path="novel/:novelId/entities" element={<EntityManager />} />
         <Route path="novel/:novelId/outline" element={<OutlineEditor />} />
         <Route path="novel/:novelId/workflow" element={<WorkflowChat />} />
         <Route path="novel/:novelId/workflow/new" element={<WorkflowPage />} />
@@ -61,6 +65,8 @@ function App() {
         <Route path="training" element={<TrainingDashboard />} />
         <Route path="training/:batchId" element={<RLVisualization />} />
         <Route path="evaluation" element={<Evaluation />} />
+        <Route path="evaluation/optimizer" element={<EvaluationOptimizer />} />
+        <Route path="novel/:novelId/snapshots" element={<SnapshotsPage />} />
       </Route>
 
       {/* 默认重定向 */}

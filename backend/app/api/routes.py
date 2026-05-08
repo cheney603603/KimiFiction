@@ -6,9 +6,9 @@ from fastapi import APIRouter
 
 from app.api.endpoints import (
     auth, novels, chapters, characters, outlines,
-    memory, workflow, tasks, export, llm_config, training
+    memory, workflow, tasks, export, llm_config, training, entities, snapshots
 )
-from app.api.endpoints import training_pipeline
+from app.api.endpoints import training_pipeline, evaluation_optimizer
 
 # 创建主路由
 api_router = APIRouter(prefix="/api/v1")
@@ -26,3 +26,6 @@ api_router.include_router(export.router, prefix="/export", tags=["数据导出"]
 api_router.include_router(llm_config.router, prefix="/llm", tags=["LLM配置"])
 api_router.include_router(training.router, tags=["RL训练"])
 api_router.include_router(training_pipeline.router, tags=["Training-Pipeline"])
+api_router.include_router(entities.router, prefix="/entities", tags=["实体管理"])
+api_router.include_router(snapshots.router, tags=["快照管理"])
+api_router.include_router(evaluation_optimizer.router, tags=["评测规则优化"])

@@ -10,6 +10,8 @@ from loguru import logger
 
 from app.core.vector_store import vector_store
 from app.services.memory_service import MemoryService
+from app.services.entity_store_service import EntityStoreService
+from app.services.entity_retrieval_service import EntityRetrievalService
 from app.core.database import get_session
 
 
@@ -272,9 +274,15 @@ class ContextManager:
         chapter_context = await self.retrieve_chapter_context(chapter_number, num_chapters=3)
         blocks.extend(chapter_context)
         
+        # Entity-Aware RAG: 实体状态召回
+        entity_context_blocks = await self._retrieve_entity_context(
+            chapter_number, outline
+        )
+        blocks.extend(entity_context_blocks)
+
         # 2. 压缩上下文
         compressed = self._compress_context(blocks)
-        
+
         # 3. 构建最终上下文
         context = {
             "chapter_number": chapter_number,
@@ -298,6 +306,8 @@ class ContextManager:
             "unresolved_mysteries": self._extract_mysteries(blocks),
             "recent_events": self._extract_recent_events(blocks),
             "foreshadowing": self._extract_foreshadowing(blocks),
+            # Entity-Aware: 实体状态卡片
+            "entity_states": self._extract_entity_states(blocks),
         }
         
         return context
@@ -580,6 +590,179 @@ class ContextManager:
                 foreshadowing.append(block.content)
         return foreshadowing
     
+    async def _retrieve_entity_context(
+        self,
+        chapter_number: int,
+        outline: Dict[str, Any]
+    ) -> List[ContextBlock]:
+        """
+        Entity-Aware RAG: 召回实体状态和关系上下文
+        
+        召回策略（按优先级）：
+        1. 实体当前状态卡片（最高优先级）
+        2. 1跳关系邻居的当前状态
+        3. 该实体在RAG库中最近提及的段落
+        """
+        blocks: List[ContextBlock] = []
+        
+        try:
+            retrieval_service = EntityRetrievalService(self.novel_id)
+            store_service = EntityStoreService(self.novel_id)
+            
+            # 获取当前章节涉及的实体
+            # 策略：从大纲中提取可能涉及的实体名称
+            active_entities = await self._detect_entities_from_outline(outline)
+            
+            if active_entities:
+                # 传入当前段落文本（从大纲构建的查询）用于实体检测
+                query_text = outline.get("summary", "") + " " + " ".join(outline.get("key_points", []))
+                
+                # 召回实体上下文
+                context_chunks = await retrieval_service.retrieve_for_entities(
+                    current_paragraph=query_text,
+                    active_entities=active_entities,
+                    paragraph_id=chapter_number * 10000,
+                    top_k_per_entity=2
+                )
+                
+                # 转换为ContextBlock
+                for chunk in context_chunks:
+                    blocks.append(ContextBlock(
+                        content=chunk.content,
+                        source_type=chunk.source,
+                        source_id=chunk.entity_id or "unknown",
+                        importance=1.0 - (chunk.priority - 1) * 0.2,  # priority=1 -> 1.0, priority=2 -> 0.8, priority=3 -> 0.6
+                        metadata={
+                            "chapter_number": chunk.chapter_number,
+                            "paragraph_id": chunk.paragraph_id,
+                            "entity_id": chunk.entity_id,
+                        }
+                    ))
+                    
+                logger.info(
+                    f"[EntityContext] 第{chapter_number}章召回"
+                    f" {len(context_chunks)} 个实体上下文块"
+                )
+            else:
+                # 没有活跃实体时，获取最近出现的实体作为参考
+                all_entities = await store_service.get_all_entities()
+                if all_entities:
+                    # 取最近提及的5个实体
+                    recent = sorted(
+                        all_entities,
+                        key=lambda e: e.get("last_mentioned_chapter_number", 0) or 0,
+                        reverse=True
+                    )[:5]
+                    for entity in recent:
+                        state_card = self._build_entity_state_card(entity)
+                        if state_card:
+                            blocks.append(ContextBlock(
+                                content=state_card,
+                                source_type="entity_state",
+                                source_id=entity.get("entity_id", ""),
+                                importance=0.7,
+                                metadata={
+                                    "chapter_number": entity.get("last_mentioned_chapter_number"),
+                                    "entity_id": entity.get("entity_id"),
+                                }
+                            ))
+                        
+        except Exception as e:
+            logger.error(f"[EntityContext] 实体上下文召回失败: {e}")
+        
+        return blocks
+    
+    async def _detect_entities_from_outline(
+        self,
+        outline: Dict[str, Any]
+    ) -> List[str]:
+        """
+        从章节大纲中检测可能涉及的实体ID
+        
+        策略：
+        1. 尝试从workflow_state获取active_entities
+        2. 如果没有，使用EntityRetrievalService的关键词匹配
+        """
+        # 如果workflow_state中有active_entities，直接使用
+        if self.workflow_state and hasattr(self.workflow_state, "active_entities"):
+            return self.workflow_state.active_entities or []
+        
+        # 否则，从大纲文本中匹配实体名称
+        try:
+            store_service = EntityStoreService(self.novel_id)
+            all_entities = await store_service.get_all_entities()
+            
+            if not all_entities:
+                return []
+            
+            # 构建查询文本
+            query_text = json.dumps(outline, ensure_ascii=False)
+            
+            # 简单关键词匹配
+            matched_ids = []
+            for entity in all_entities:
+                canonical = entity.get("canonical_name", "")
+                aliases = entity.get("aliases", [])
+                all_names = [canonical] + aliases
+                
+                for name in all_names:
+                    if name and len(name) >= 2 and name in query_text:
+                        entity_id = entity.get("entity_id")
+                        if entity_id and entity_id not in matched_ids:
+                            matched_ids.append(entity_id)
+                        break
+            
+            return matched_ids
+            
+        except Exception as e:
+            logger.error(f"[EntityContext] 实体检测失败: {e}")
+            return []
+    
+    def _build_entity_state_card(self, entity_data: Dict[str, Any]) -> Optional[str]:
+        """构建实体状态卡片文本"""
+        name = entity_data.get("canonical_name", "未知")
+        entity_type = entity_data.get("entity_type", "unknown")
+        state = entity_data.get("state_vector", {})
+        summary = entity_data.get("narrative_summary", "")
+        
+        if not state and not summary:
+            return None
+        
+        type_label = {
+            "character": "角色",
+            "faction": "势力",
+            "skill": "功法",
+            "item": "物品",
+            "location": "地点"
+        }.get(entity_type, entity_type)
+        
+        parts = [f"【{type_label}】{name}"]
+        if state:
+            parts.append("状态:")
+            for k, v in list(state.items())[:5]:  # 最多5个状态
+                parts.append(f"  - {k}: {v}")
+        if summary:
+            parts.append(f"叙事: {summary[:100]}")
+        
+        last_ch = entity_data.get("last_mentioned_chapter_number")
+        if last_ch:
+            parts.append(f"(第{last_ch}章提及)")
+        
+        return "\n".join(parts)
+    
+    def _extract_entity_states(self, blocks: List[ContextBlock]) -> List[Dict[str, Any]]:
+        """从上下文块中提取实体状态信息"""
+        entity_states = []
+        for block in blocks:
+            if block.source_type in ["entity_state", "entity_rel"]:
+                entity_states.append({
+                    "content": block.content,
+                    "source_id": block.source_id,
+                    "source_type": block.source_type,
+                    "chapter_number": block.metadata.get("chapter_number"),
+                })
+        return entity_states
+    
     # ===== 上下文格式化为提示词 =====
     
     def format_for_prompt(self, context: Dict[str, Any]) -> str:
@@ -626,6 +809,14 @@ class ContextManager:
             parts.append("\n【未解伏笔】")
             for m in mysteries[:3]:
                 parts.append(f"- {m[:100]}")
+        
+        # Entity-Aware: 实体状态
+        entity_states = context.get("entity_states", [])
+        if entity_states:
+            parts.append("\n【实体状态】")
+            for es in entity_states[:8]:  # 最多8个实体
+                content = es.get("content", "")
+                parts.append(content[:200] + "..." if len(content) > 200 else content)
         
         return "\n".join(parts)
 

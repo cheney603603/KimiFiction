@@ -1,6 +1,7 @@
 """
 读者体验智能体
 从读者视角评估章节可读性、情绪钩子和追读欲望
+（已集成状态追踪）
 
 包含两层评估体系：
 1. ReaderAgent     - 基于 LLM 的定性反馈（困惑点、修改建议等）
@@ -11,6 +12,9 @@ import re
 from typing import Any, Dict, List, Optional, Tuple
 
 from app.agents.base import BaseAgent
+from app.services.llm_service_tracked import TrackedLLMService
+from app.services.llm_service import LLMProvider
+from app.core.llm_call_tracker import set_novel_context
 
 
 class ReaderAgent(BaseAgent):
@@ -26,11 +30,33 @@ class ReaderAgent(BaseAgent):
 
 输出必须是合法JSON。"""
 
-    def __init__(self):
+    def __init__(self, novel_id: Optional[int] = None):
         super().__init__("Reader", self.SYSTEM_PROMPT)
+        self.novel_id = novel_id
+        if novel_id:
+            self._llm = TrackedLLMService(
+                provider=LLMProvider.DEEPSEEK,
+                novel_id=novel_id,
+                agent_name="reader",
+                auto_track=True
+            )
+            set_novel_context(novel_id)
 
     async def process(self, context: Dict[str, Any]) -> Dict[str, Any]:
+        novel_id = context.get("novel_id") or self.novel_id
         chapter_number = context.get("chapter_number", 0)
+        
+        # 设置追踪上下文
+        if novel_id:
+            set_novel_context(novel_id, chapter_number)
+            if not hasattr(self, '_llm') or not self._llm:
+                self._llm = TrackedLLMService(
+                    provider=LLMProvider.DEEPSEEK,
+                    novel_id=novel_id,
+                    agent_name="reader",
+                    auto_track=True
+                )
+        
         chapter_content = context.get("chapter_content", "")
         outline = context.get("outline", {})
         target_reader = context.get("target_reader", "大众网文读者")

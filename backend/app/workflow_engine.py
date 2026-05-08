@@ -25,6 +25,7 @@ from app.agents.world_builder import WorldBuilderAgent
 from app.agents.plot_designer import PlotDesignerAgent
 from app.agents.reader import ReaderAgent
 from app.agents.reviewer import ReviewerAgent
+from app.agents.phase_requirement_reviewer import PhaseRequirementReviewerAgent
 from app.agents.unified_agent import (
     UnifiedWorldBuilderAgent,
     UnifiedCharacterDesignerAgent,
@@ -123,6 +124,9 @@ class WorkflowState:
     completed_chapters: List[int] = field(default_factory=list)
     confirmed_chapters: List[int] = field(default_factory=list)
 
+    # Entity-Aware RAG: 活跃实体列表
+    active_entities: List[str] = field(default_factory=list)
+
     # 反馈追踪
     pending_revisions: List[Dict[str, Any]] = field(default_factory=list)  # 待处理修改
     revision_history: List[Dict[str, Any]] = field(default_factory=list)  # 修改历史
@@ -139,6 +143,8 @@ class WorkflowState:
     # 用户交互
     pending_questions: List[Dict[str, Any]] = field(default_factory=list)
     user_confirmations: Dict[str, bool] = field(default_factory=dict)
+    phase_artifacts: Dict[str, Dict[str, Any]] = field(default_factory=dict)
+    phase_conversations: Dict[str, List[Dict[str, Any]]] = field(default_factory=dict)
 
     # 错误恢复
     last_error: Optional[str] = None
@@ -263,6 +269,7 @@ class WorkflowEngine:
         self._agents: Dict[str, Callable] = {}  # agent_name -> agent_instance
         self._callbacks: Dict[str, List[Callable]] = {}  # event -> callbacks
         self._error_handler = ErrorRecoveryStrategy()
+        self._phase_requirement_reviewer = PhaseRequirementReviewerAgent()
 
         # 阶段显示名称映射
         self._phase_display_names = {
@@ -280,6 +287,52 @@ class WorkflowEngine:
             "paused": "已暂停",
             "completed": "已完成",
             "error": "错误",
+        }
+        self._phase_requirement_schemas = {
+            WorkflowPhase.DEMAND_ANALYSIS.value: [
+                {"id": "genre", "label": "题材类型", "required": True, "description": "小说主类型与子类型"},
+                {"id": "core_theme", "label": "核心主题", "required": True, "description": "故事想表达什么"},
+                {"id": "target_audience", "label": "目标读者", "required": True, "description": "面向谁阅读"},
+                {"id": "tone_style", "label": "语气风格", "required": True, "description": "整体风格与调性"},
+                {"id": "selling_points", "label": "核心卖点", "required": True, "description": "最吸引读者的点"},
+                {"id": "taboos", "label": "禁忌与边界", "required": False, "description": "不希望出现的内容"},
+            ],
+            WorkflowPhase.WORLD_BUILDING.value: [
+                {"id": "world_overview", "label": "世界观概述", "required": True, "description": "世界的基本面貌"},
+                {"id": "power_system", "label": "力量体系", "required": True, "description": "能力/规则/代价"},
+                {"id": "social_structure", "label": "社会结构", "required": True, "description": "势力、阶层、组织"},
+                {"id": "geography", "label": "地理环境", "required": False, "description": "主要地点与空间布局"},
+                {"id": "history", "label": "历史背景", "required": False, "description": "关键历史事件"},
+                {"id": "world_rules", "label": "关键规则", "required": True, "description": "世界运行边界与限制"},
+            ],
+            WorkflowPhase.CHARACTER_DESIGN.value: [
+                {"id": "protagonist", "label": "主角设计", "required": True, "description": "主角身份、目标、缺陷"},
+                {"id": "antagonist", "label": "主要对手", "required": True, "description": "反派或核心阻力"},
+                {"id": "supporting_cast", "label": "关键配角", "required": True, "description": "推动剧情的配角"},
+                {"id": "motivation", "label": "角色动机", "required": True, "description": "角色想要什么"},
+                {"id": "relationships", "label": "人物关系", "required": True, "description": "人物之间的张力"},
+                {"id": "growth_arc", "label": "成长弧线", "required": False, "description": "角色变化方向"},
+            ],
+            WorkflowPhase.PLOT_DESIGN.value: [
+                {"id": "core_conflict", "label": "核心冲突", "required": True, "description": "故事主冲突"},
+                {"id": "sub_conflicts", "label": "支线冲突", "required": False, "description": "辅助冲突与张力"},
+                {"id": "foreshadowing", "label": "伏笔规划", "required": True, "description": "埋点与回收安排"},
+                {"id": "mystery_hooks", "label": "悬念钩子", "required": True, "description": "推动追读的问题"},
+                {"id": "rhythm", "label": "节奏设计", "required": True, "description": "张弛与高潮布局"},
+            ],
+            WorkflowPhase.OUTLINE_DRAFT.value: [
+                {"id": "overall_arc", "label": "整体故事弧", "required": True, "description": "长篇整体走向"},
+                {"id": "volume_structure", "label": "卷级结构", "required": True, "description": "每卷主题与任务"},
+                {"id": "major_turning_points", "label": "关键转折", "required": True, "description": "重要剧情节点"},
+                {"id": "ending_direction", "label": "结局方向", "required": False, "description": "目标结局或终局感"},
+            ],
+            WorkflowPhase.OUTLINE_DETAIL.value: [
+                {"id": "chapter_progression", "label": "章节推进", "required": True, "description": "每章推进主线什么"},
+                {"id": "chapter_goal", "label": "本章目标", "required": True, "description": "章节功能与目的"},
+                {"id": "scene_arrangement", "label": "场景安排", "required": True, "description": "场景分布和顺序"},
+                {"id": "hook_design", "label": "章末钩子", "required": True, "description": "本章结尾吸引力"},
+                {"id": "continuity_notes", "label": "衔接说明", "required": False, "description": "与上下章的连接"},
+            ],
         }
 
         logger.info(f"初始化工作流引擎: novel_id={novel_id}")
@@ -512,6 +565,156 @@ class WorkflowEngine:
         else:
             return base_delay
 
+    def _get_phase_requirement_schema(self, phase: WorkflowPhase) -> List[Dict[str, Any]]:
+        return self._phase_requirement_schemas.get(phase.value, [])
+
+    def _normalize_phase_result_data(self, phase: WorkflowPhase, data: Optional[Dict[str, Any]]) -> Dict[str, Any]:
+        if not isinstance(data, dict):
+            return {}
+
+        meta_keys = {"_prompt_build_info", "_requirement_review", "_assistant_message", "_conversation"}
+
+        if phase == WorkflowPhase.DEMAND_ANALYSIS:
+            normalized = data.get("analysis", data)
+        elif phase == WorkflowPhase.WORLD_BUILDING:
+            normalized = data.get("world_setting", data)
+        elif phase == WorkflowPhase.CHARACTER_DESIGN:
+            normalized = {
+                "characters": data.get("characters", []),
+                "relationship_summary": data.get("relationship_summary", ""),
+            }
+        elif phase == WorkflowPhase.PLOT_DESIGN:
+            normalized = data.get("plot_setting", data)
+        elif phase == WorkflowPhase.OUTLINE_DRAFT:
+            normalized = {
+                "volumes": data.get("volumes", []),
+                "overall_arc": data.get("overall_arc", ""),
+                "estimated_chapters": data.get("estimated_chapters", 0),
+            }
+        elif phase == WorkflowPhase.OUTLINE_DETAIL:
+            normalized = {
+                "chapter_outlines": data.get("chapter_outlines", data if isinstance(data, list) else []),
+            }
+        else:
+            normalized = data
+
+        if not isinstance(normalized, dict):
+            normalized = {}
+
+        for key in meta_keys:
+            if key in data:
+                normalized[key] = data[key]
+        return normalized
+
+    def _build_phase_fallback_message(self, phase: WorkflowPhase, normalized_data: Dict[str, Any], requirement_review: Dict[str, Any]) -> str:
+        phase_label = self._phase_display_names.get(phase.value, phase.value)
+        parts: List[str] = []
+
+        if phase == WorkflowPhase.DEMAND_ANALYSIS:
+            genre = normalized_data.get("suggested_genre") or normalized_data.get("genre")
+            audience = normalized_data.get("target_audience")
+            if genre or audience:
+                parts.append(f"{phase_label}已更新。当前题材方向为'{genre or '待补充'}'，目标读者为'{audience or '待补充'}'。")
+        elif phase == WorkflowPhase.WORLD_BUILDING:
+            world_name = normalized_data.get("world_name")
+            overview = normalized_data.get("overview")
+            if world_name or overview:
+                parts.append(f"{phase_label}已更新。世界设定核心为'{world_name or '当前世界'}'，{overview or '已生成基础说明'}。")
+        elif phase == WorkflowPhase.CHARACTER_DESIGN:
+            characters = normalized_data.get("characters", [])
+            if characters:
+                names = "、".join([c.get("name", "未命名") for c in characters[:3]])
+                parts.append(f"{phase_label}已更新。当前已生成 {len(characters)} 位角色，重点包括：{names}。")
+        elif phase == WorkflowPhase.PLOT_DESIGN:
+            conflicts = normalized_data.get("core_conflicts", [])
+            parts.append(f"{phase_label}已更新。当前已形成 {len(conflicts) if isinstance(conflicts, list) else 0} 项核心冲突规划。")
+        elif phase == WorkflowPhase.OUTLINE_DRAFT:
+            volumes = normalized_data.get("volumes", [])
+            parts.append(f"{phase_label}已更新。当前大纲共 {len(volumes)} 卷。")
+        elif phase == WorkflowPhase.OUTLINE_DETAIL:
+            chapter_outlines = normalized_data.get("chapter_outlines", [])
+            parts.append(f"{phase_label}已更新。当前已生成 {len(chapter_outlines)} 章细纲。")
+
+        missing_required = requirement_review.get("missing_required", [])
+        if missing_required:
+            parts.append(f"进入下一阶段前还缺少：{'、'.join(missing_required)}。")
+        else:
+            parts.append("当前必填信息基本齐备，可以由你判断是否进入下一阶段。")
+
+        directions = requirement_review.get("optimization_directions", [])
+        if directions:
+            parts.append(f"建议优先补强：{'；'.join(directions[:3])}。")
+
+        return "\n".join(parts).strip()
+
+    async def _review_phase_requirements(
+        self,
+        phase: WorkflowPhase,
+        normalized_data: Dict[str, Any],
+        input_data: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        schema = self._get_phase_requirement_schema(phase)
+        if not schema:
+            return {
+                "success": True,
+                "collected_information": {},
+                "missing_required": [],
+                "missing_optional": [],
+                "is_ready_for_next_phase": True,
+                "assistant_message": "",
+                "optimization_directions": [],
+            }
+
+        review_result = await self._phase_requirement_reviewer.process({
+            "phase": phase.value,
+            "phase_label": self._phase_display_names.get(phase.value, phase.value),
+            "requirement_schema": schema,
+            "normalized_result": normalized_data,
+            "user_input": (input_data or {}).get("user_input", ""),
+            "messages": (input_data or {}).get("messages", []),
+        })
+        return review_result
+
+    async def _enrich_phase_result(
+        self,
+        phase: WorkflowPhase,
+        input_data: Optional[Dict[str, Any]],
+        result_data: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        normalized_data = self._normalize_phase_result_data(phase, result_data)
+        requirement_review = await self._review_phase_requirements(phase, normalized_data, input_data)
+
+        assistant_message = requirement_review.get("assistant_message", "") if requirement_review.get("success") else ""
+        if not assistant_message:
+            assistant_message = self._build_phase_fallback_message(phase, normalized_data, requirement_review)
+
+        conversation = []
+        user_input = (input_data or {}).get("user_input")
+        if user_input:
+            conversation.append({
+                "role": "user",
+                "content": user_input,
+                "timestamp": datetime.now().isoformat(),
+            })
+        conversation.append({
+            "role": "assistant",
+            "content": assistant_message,
+            "timestamp": datetime.now().isoformat(),
+        })
+
+        enriched = dict(result_data)
+        enriched["_requirement_review"] = {
+            "schema": self._get_phase_requirement_schema(phase),
+            "collected_information": requirement_review.get("collected_information", {}),
+            "missing_required": requirement_review.get("missing_required", []),
+            "missing_optional": requirement_review.get("missing_optional", []),
+            "is_ready_for_next_phase": requirement_review.get("is_ready_for_next_phase", False),
+            "optimization_directions": requirement_review.get("optimization_directions", []),
+        }
+        enriched["_assistant_message"] = assistant_message
+        enriched["_conversation"] = conversation
+        return enriched
+
     # ===== 阶段流转 =====
 
     def get_phase_order(self) -> List[WorkflowPhase]:
@@ -566,17 +769,26 @@ class WorkflowEngine:
                 return
 
         logger.info(f"[WorkflowEngine] 保存阶段数据: phase={phase.value}, data_keys={list(data.keys())}")
+        normalized_data = self._normalize_phase_result_data(phase, data)
+        self.state.phase_artifacts[phase.value] = {
+            "data": normalized_data,
+            "assistant_message": data.get("_assistant_message", ""),
+            "requirement_review": data.get("_requirement_review", {}),
+            "updated_at": datetime.now().isoformat(),
+        }
+        phase_conversation = self.state.phase_conversations.get(phase.value, [])
+        if data.get("_conversation"):
+            phase_conversation.extend(data["_conversation"])
+            self.state.phase_conversations[phase.value] = phase_conversation[-20:]
 
         if phase == WorkflowPhase.DEMAND_ANALYSIS:
-            self.state.demand_analysis = data
+            self.state.demand_analysis = normalized_data
         elif phase == WorkflowPhase.WORLD_BUILDING:
-            self.state.world_setting = data
+            self.state.world_setting = normalized_data
+            # ── 实体同步：将世界观中的势力/地区写入 entities 表 ──
+            asyncio.create_task(self._sync_world_entities(normalized_data))
         elif phase == WorkflowPhase.CHARACTER_DESIGN:
-            characters = data.get("characters", [])
-            if not characters and isinstance(data.get("data"), dict):
-                characters = data["data"].get("characters", [])
-            if not characters and isinstance(data.get("result"), dict):
-                characters = data["result"].get("characters", [])
+            characters = normalized_data.get("characters", [])
             if not isinstance(characters, list):
                 logger.warning(f"[WorkflowEngine] CHARACTER_DESIGN: characters field is not a list: {type(characters)}")
                 characters = []
@@ -585,28 +797,23 @@ class WorkflowEngine:
 
             self.state.characters = characters
 
-            # 同步角色到数据库
+            # 同步角色到数据库（characters 表，已有逻辑）
             if characters and isinstance(characters, list):
                 logger.info(f"[WorkflowEngine] CHARACTER_DESIGN: 开始同步 {len(characters)} 个角色到数据库")
                 await self._sync_characters_to_db(characters)
             else:
                 logger.warning(f"[WorkflowEngine] CHARACTER_DESIGN: characters数据格式异常: {type(characters)}")
+            # ── 实体同步：同时将角色写入 entities 表（供 EntityManager 展示）──
+            if characters:
+                asyncio.create_task(self._sync_character_entities(characters))
         elif phase == WorkflowPhase.PLOT_DESIGN:
-            self.state.plot_setting = data
+            self.state.plot_setting = normalized_data
         elif phase == WorkflowPhase.OUTLINE_DRAFT:
-            self.state.outline = data
+            self.state.outline = normalized_data
         elif phase == WorkflowPhase.OUTLINE_DETAIL:
             # 统一格式为数组
-            outlines_data = data
-            if isinstance(data, dict):
-                if "chapter_outlines" in data and isinstance(data["chapter_outlines"], list):
-                    outlines_data = data["chapter_outlines"]
-                elif "outlines" in data and isinstance(data["outlines"], list):
-                    outlines_data = data["outlines"]
-                else:
-                    # 尝试从字典中提取按章节号排序的值
-                    outlines_data = [v for k, v in sorted(data.items()) if isinstance(v, dict)]
-            
+            outlines_data = normalized_data.get("chapter_outlines", [])
+
             if isinstance(outlines_data, list):
                 self.state.chapter_outlines = outlines_data
                 logger.info(f"[WorkflowEngine] OUTLINE_DETAIL: 保存了 {len(outlines_data)} 个章节细纲")
@@ -630,10 +837,11 @@ class WorkflowEngine:
                     return
 
                 update_data = {}
+                normalized_data = self._normalize_phase_result_data(phase, data)
 
                 if phase == WorkflowPhase.DEMAND_ANALYSIS:
                     # 保存类型分析结果到 novels 表
-                    update_data["genre_analysis"] = json.dumps(data, ensure_ascii=False)
+                    update_data["genre_analysis"] = json.dumps(normalized_data, ensure_ascii=False)
 
                 elif phase == WorkflowPhase.CHARACTER_DESIGN:
                     # ⚠️ 注意：角色数据的实际保存由 transition_to -> _save_phase_data -> _sync_characters_to_db 处理
@@ -643,17 +851,17 @@ class WorkflowEngine:
 
                 elif phase == WorkflowPhase.WORLD_BUILDING:
                     # 保存世界观设定到 novels 表
-                    update_data["world_setting"] = json.dumps(data, ensure_ascii=False)
+                    update_data["world_setting"] = json.dumps(normalized_data, ensure_ascii=False)
 
                 elif phase == WorkflowPhase.PLOT_DESIGN:
                     # 保存冲突伏笔到 novel 的扩展字段或新建表
                     # 这里我们存到 novels 表的 style_prompt 字段（临时复用）
-                    update_data["style_prompt"] = json.dumps(data, ensure_ascii=False)
+                    update_data["style_prompt"] = json.dumps(normalized_data, ensure_ascii=False)
 
                 elif phase == WorkflowPhase.OUTLINE_DRAFT:
                     # 保存大纲到 outlines 表
                     from app.models.outline import Outline
-                    outline_title = data.get("outline_title", "剧情大纲")
+                    outline_title = normalized_data.get("outline_title", "剧情大纲")
                     existing_outline = await db.execute(
                         select(Outline).where(
                             Outline.novel_id == self.novel_id,
@@ -663,13 +871,13 @@ class WorkflowEngine:
                     outline_record = existing_outline.scalar_one_or_none()
                     if outline_record:
                         outline_record.volume_title = outline_title
-                        outline_record.content = json.dumps(data, ensure_ascii=False)
+                        outline_record.content = json.dumps(normalized_data, ensure_ascii=False)
                     else:
                         outline_record = Outline(
                             novel_id=self.novel_id,
                             volume_number=1,
                             volume_title=outline_title,
-                            content=json.dumps(data, ensure_ascii=False),
+                            content=json.dumps(normalized_data, ensure_ascii=False),
                             outline_type="main",
                         )
                         db.add(outline_record)
@@ -687,8 +895,8 @@ class WorkflowEngine:
                     
                     # 从 data 或 state 中获取细纲数组
                     outlines_to_save = self.state.chapter_outlines if self.state.chapter_outlines else []
-                    if not outlines_to_save and isinstance(data, dict) and "chapter_outlines" in data:
-                        outlines_to_save = data["chapter_outlines"]
+                    if not outlines_to_save:
+                        outlines_to_save = normalized_data.get("chapter_outlines", [])
                     
                     if detail_record:
                         detail_record.content = json.dumps(outlines_to_save, ensure_ascii=False)
@@ -845,6 +1053,7 @@ class WorkflowEngine:
         result = await self._execute_task(task)
 
         if result.success:
+            result.data = await self._enrich_phase_result(phase, input_data or {}, result.data)
             await self.transition_to(phase, result.data)
             # 同时持久化到数据库
             await self._persist_phase_result_to_db(phase, result.data)
@@ -1078,6 +1287,26 @@ class WorkflowEngine:
             logger.error(f"[WorkflowEngine] ❌ 同步角色到数据库失败: {e}", exc_info=True)
             # 不抛出异常，不影响主流程
 
+    async def _sync_character_entities(self, characters: List[Dict[str, Any]]) -> None:
+        """将角色设计结果同步写入 entities 表（供 EntityManager 展示）"""
+        try:
+            from app.services.workflow_entity_sync import WorkflowEntitySyncService
+            sync = WorkflowEntitySyncService(self.novel_id)
+            count = await sync.sync_characters(characters)
+            logger.info(f"[WorkflowEngine] ✅ 实体同步（角色）完成: {count} 个实体")
+        except Exception as e:
+            logger.warning(f"[WorkflowEngine] 实体同步（角色）失败（非阻塞）: {e}")
+
+    async def _sync_world_entities(self, world_setting: Dict[str, Any]) -> None:
+        """将世界观设定中的势力/地区同步写入 entities 表（供 EntityManager 展示）"""
+        try:
+            from app.services.workflow_entity_sync import WorkflowEntitySyncService
+            sync = WorkflowEntitySyncService(self.novel_id)
+            count = await sync.sync_world_setting(world_setting)
+            logger.info(f"[WorkflowEngine] ✅ 实体同步（世界观）完成: {count} 个实体")
+        except Exception as e:
+            logger.warning(f"[WorkflowEngine] 实体同步（世界观）失败（非阻塞）: {e}")
+
     # ===== 章节写作 =====
 
     async def write_chapter(
@@ -1151,6 +1380,12 @@ class WorkflowEngine:
         writer_reader_max_rounds = int((writing_params or {}).get("writer_reader_max_rounds", 3))
         reader_score_threshold = float((writing_params or {}).get("reader_score_threshold", 0.78))
         hook_score_threshold = float((writing_params or {}).get("hook_score_threshold", 0.70))
+        reader_agent = self._agents.get("reader")
+        reviewer_agent = self._agents.get("reviewer")
+        result = None
+        reader_result: Dict[str, Any] = {}
+        chapter_content = ""
+        loop_history: List[Dict[str, Any]] = []
 
         # ── Writer-Reader RL 对抗循环 ──
         try:
@@ -1192,16 +1427,15 @@ class WorkflowEngine:
                 },
             )
             loop_history = rl_result.get("loop_history", [])
+            chapter_content = result.data.get("content", "")
+            reader_result = {
+                "success": True,
+                "reader_feedback": result.data.get("reader_feedback", {}),
+            }
             
         except Exception as e:
             logger.warning(f"[write_chapter] Writer-Reader RL循环失败，降级为原逻辑: {e}")
             # 降级：使用原有的单轮写作逻辑
-            reader_agent = self._agents.get("reader")
-            reviewer_agent = self._agents.get("reviewer")
-            result = None
-            reader_result = {}
-            chapter_content = ""
-
             for loop_round in range(1, writer_reader_max_rounds + 1):
                 loop_input = {
                     **chapter_input,
@@ -1292,6 +1526,85 @@ class WorkflowEngine:
                     "reader_feedback": reader_result.get("reader_feedback", {}),
                 })
                 result.data["editor_review"] = review_result
+
+            if chapter_content:
+                try:
+                    from app.services.rubric_evaluation_service import RubricEvaluationService
+
+                    rubric_service = RubricEvaluationService(self.novel_id)
+                    await rubric_service.initialize()
+                    rubric_result = await rubric_service.evaluate_chapter(
+                        chapter_number=chapter_number,
+                        chapter_content=chapter_content,
+                    )
+                    result.data["rubric_evaluation"] = rubric_result
+                    logger.info(f"[write_chapter] Rubric评测完成: chapter={chapter_number}, score={rubric_result.get('total_score', 'N/A')}")
+                except Exception as rubric_error:
+                    logger.warning(f"[write_chapter] Rubric评测执行失败: {rubric_error}")
+                    import traceback
+                    logger.warning(f"[write_chapter] Rubric错误详情: {traceback.format_exc()}")
+
+            # ── Entity-Aware RAG: 实体抽取与状态更新 ──
+            if chapter_content:
+                try:
+                    from app.services.entity_extraction_service import EntityExtractionService
+                    from app.services.entity_store_service import EntityStoreService
+                    
+                    paragraph_id = chapter_number * 10000
+                    
+                    store_service = EntityStoreService(self.novel_id)
+                    existing_entities = await store_service.get_all_entities()
+                    
+                    extraction_service = EntityExtractionService()
+                    extraction_result = await extraction_service.extract_from_paragraph(
+                        current_paragraph=chapter_content,
+                        paragraph_id=paragraph_id,
+                        existing_entities=existing_entities
+                    )
+                    
+                    if extraction_result.mentions:
+                        updated_entities = await store_service.create_or_update_entities(
+                            mentions=extraction_result.mentions,
+                            paragraph_id=paragraph_id,
+                            chapter_number=chapter_number
+                        )
+                        
+                        # 构建 name -> entity_id 映射用于关系创建
+                        entity_map = {
+                            e["canonical_name"]: e["entity_id"]
+                            for e in updated_entities
+                        }
+                        for e in existing_entities:
+                            if e["canonical_name"] not in entity_map:
+                                entity_map[e["canonical_name"]] = e["entity_id"]
+                        
+                        if extraction_result.relations:
+                            await store_service.create_relationships(
+                                relations=extraction_result.relations,
+                                entity_map=entity_map,
+                                paragraph_id=paragraph_id,
+                                chapter_number=chapter_number
+                            )
+                        
+                        # 更新workflow_state中的活跃实体
+                        self.state.active_entities = [
+                            m.entity_id for m in extraction_result.mentions if m.entity_id
+                        ]
+                        
+                        logger.info(
+                            f"[EntityUpdate] 第{chapter_number}章提取到 "
+                            f"{len(extraction_result.mentions)} 个实体, "
+                            f"活跃实体: {len(self.state.active_entities)}"
+                        )
+                        
+                        # 将实体更新信息加入result
+                        result.data["entity_update"] = {
+                            "extracted_count": len(extraction_result.mentions),
+                            "active_entities": self.state.active_entities,
+                            "relations_created": len(extraction_result.relations) if extraction_result.relations else 0,
+                        }
+                except Exception as e:
+                    logger.error(f"[EntityUpdate] 实体更新失败: {e}")
 
             self.state.revision_history.append({
                 "chapter_number": chapter_number,

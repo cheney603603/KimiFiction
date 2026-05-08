@@ -152,7 +152,7 @@ export function RelationshipGraph({ novelId }: RelationshipGraphProps) {
                   textAnchor="middle"
                   fontSize="10"
                   fill="#6B7280"
-                  bgColor="white"
+                  // bgColor removed - not a valid SVG attribute
                 >
                   {relationLabels[edge.relation] || edge.relation}
                 </text>

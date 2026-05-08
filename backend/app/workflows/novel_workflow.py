@@ -97,6 +97,11 @@ class NovelGraphState(TypedDict):
     # ── RAG 上下文 ──
     rag_context: Dict[str, Any]  # RAG检索结果
     
+    # ── Entity-Aware RAG 新增 ──
+    active_entities: List[str]      # 当前段落涉及的实体ID列表
+    entity_context: List[str]       # 实体召回上下文
+    final_context: List[str]        # 融合后的最终上下文
+    
     # ── Checkpoint 专用 ──
     checkpoint_id: str
     
@@ -229,11 +234,48 @@ async def node_prepare_chapter(state: NovelGraphState) -> NovelGraphState:
     rag = HierarchicalRAG(state["novel_id"])
     rag_result = await rag.retrieve_for_writer(outline, top_k=8)
     state["rag_context"] = rag_result
-    state["messages"].append({
-        "role": "system",
-        "content": f"[RAG] 第{chapter_num}章检索到{len(rag_result.get('chunks', []))}个相关上下文块",
-        "type": "system"
-    })
+    
+    # ── Entity-Aware RAG: 实体召回与融合 ──
+    try:
+        from app.services.entity_retrieval_service import EntityRetrievalService
+        from app.services.context_fusion_service import ContextFusionService
+        
+        active_entities = state.get("active_entities", [])
+        paragraph_id = chapter_num * 10000  # 段落ID映射
+        
+        entity_retriever = EntityRetrievalService(state["novel_id"])
+        entity_results = await entity_retriever.retrieve_for_entities(
+            current_paragraph=outline.get("summary", ""),
+            active_entities=active_entities,
+            paragraph_id=paragraph_id,
+            top_k_per_entity=3
+        )
+        
+        fusion_service = ContextFusionService()
+        final_context = await fusion_service.fuse_contexts(
+            rag_results=rag_result,
+            entity_results=entity_results,
+            max_chunks=15
+        )
+        
+        state["entity_context"] = [r.content for r in entity_results]
+        state["final_context"] = final_context
+        
+        state["messages"].append({
+            "role": "system",
+            "content": (
+                f"[EntityRAG] 第{chapter_num}章: "
+                f"RAG={len(rag_result.get('chunks', []))}chunks, "
+                f"Entity={len(entity_results)}chunks, "
+                f"Final={len(final_context)}chunks"
+            ),
+            "type": "system"
+        })
+    except Exception as e:
+        logger.error(f"[EntityRAG] 实体召回融合失败: {e}")
+        state["final_context"] = [rag_result.get("writer_context", "")]
+        state["entity_context"] = []
+    
     _update_status(state, "prepare_chapter", NodeStatus.SUCCESS)
     return state
 
@@ -260,7 +302,7 @@ async def node_write_chapter(state: NovelGraphState) -> NovelGraphState:
     if not outline:
         outline = {"title": f"第{chapter_num}章", "summary": "", "key_events": []}
     
-    # 构建完整上下文（融合 RAG 结果）
+    # 构建完整上下文（融合 RAG + Entity-Aware 结果）
     full_context = dict(state.get("rag_context", {}))
     full_context.update({
         "world_setting": state.get("world_setting", {}),
@@ -269,6 +311,7 @@ async def node_write_chapter(state: NovelGraphState) -> NovelGraphState:
         "writing_style": "叙事流畅，情节紧凑",
         "env_level": "normal",
         "dialogue_ratio": 0.3,
+        "entity_context": state.get("final_context", []),  # 注入融合后的实体上下文
     })
     
     # 运行 Writer-Reader 对抗循环
@@ -366,8 +409,10 @@ async def node_review_chapter(state: NovelGraphState) -> NovelGraphState:
 
 
 async def node_update_memory(state: NovelGraphState) -> NovelGraphState:
-    """更新记忆节点"""
+    """更新记忆节点 + Entity-Aware RAG 实体抽取更新"""
     _update_status(state, "update_memory", NodeStatus.RUNNING)
+    
+    # ── 原有记忆管理逻辑 ──
     from app.agents.memory_manager import MemoryManagerAgent
     agent = MemoryManagerAgent()
     result = await agent.process({
@@ -375,11 +420,74 @@ async def node_update_memory(state: NovelGraphState) -> NovelGraphState:
         "chapter_number": state.get("current_chapter", 0),
         "characters": state.get("characters", [])
     })
+    
+    # ── Entity-Aware RAG: 实体抽取与状态更新 ──
+    try:
+        from app.services.entity_extraction_service import EntityExtractionService
+        from app.services.entity_store_service import EntityStoreService
+        
+        novel_id = state["novel_id"]
+        chapter_num = state.get("current_chapter", 0)
+        paragraph_id = chapter_num * 10000
+        draft = state.get("current_draft", "")
+        
+        store_service = EntityStoreService(novel_id)
+        existing_entities = await store_service.get_all_entities()
+        
+        extraction_service = EntityExtractionService()
+        extraction_result = await extraction_service.extract_from_paragraph(
+            current_paragraph=draft,
+            paragraph_id=paragraph_id,
+            existing_entities=existing_entities
+        )
+        
+        if extraction_result.mentions:
+            updated_entities = await store_service.create_or_update_entities(
+                mentions=extraction_result.mentions,
+                paragraph_id=paragraph_id,
+                chapter_number=chapter_num
+            )
+            
+            # 构建 name -> entity_id 映射用于关系创建
+            entity_map = {
+                e["canonical_name"]: e["entity_id"]
+                for e in updated_entities
+            }
+            # 补充已有实体映射
+            for e in existing_entities:
+                if e["canonical_name"] not in entity_map:
+                    entity_map[e["canonical_name"]] = e["entity_id"]
+            
+            if extraction_result.relations:
+                await store_service.create_relationships(
+                    relations=extraction_result.relations,
+                    entity_map=entity_map,
+                    paragraph_id=paragraph_id,
+                    chapter_number=chapter_num
+                )
+            
+            # 更新下一章的活跃实体
+            state["active_entities"] = [
+                m.entity_id for m in extraction_result.mentions if m.entity_id
+            ]
+            
+            state["messages"].append({
+                "role": "system",
+                "content": (
+                    f"[EntityUpdate] 第{chapter_num}章提取到 "
+                    f"{len(extraction_result.mentions)} 个实体, "
+                    f"活跃实体: {len(state['active_entities'])}"
+                ),
+                "type": "system"
+            })
+    except Exception as e:
+        logger.error(f"[EntityUpdate] 实体更新失败: {e}")
+    
     if result.get("success"):
-        # 推进到下一章
         state["current_chapter"] += 1
         state["current_draft"] = ""
         state["current_draft_version"] = 0
+    
     _update_status(state, "update_memory", NodeStatus.SUCCESS)
     return state
 
@@ -678,6 +786,9 @@ def create_initial_state(
         chapter_reward=0.0,
         writer_reader_rounds=3,
         rag_context={},
+        active_entities=[],
+        entity_context=[],
+        final_context=[],
         checkpoint_id=str(uuid.uuid4()),
         error=None,
         retry_count=0,

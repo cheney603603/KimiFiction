@@ -1,6 +1,7 @@
 """
 章节撰写智能体
 支持真正的LLM章节生成 + RAG上下文召回 + Writer-Reader RL对抗
+（已集成状态追踪）
 """
 import json
 import asyncio
@@ -8,6 +9,9 @@ from typing import Any, Dict, List, Optional
 from loguru import logger
 
 from app.agents.base import BaseAgent
+from app.services.llm_service_tracked import TrackedLLMService
+from app.services.llm_service import LLMProvider
+from app.core.llm_call_tracker import set_novel_context
 
 
 class ChapterWriterAgent(BaseAgent):
@@ -41,10 +45,19 @@ class ChapterWriterAgent(BaseAgent):
 请直接输出章节正文，不需要写"第X章"标题，直接开始正文。
 """
 
-    def __init__(self):
+    def __init__(self, novel_id: Optional[int] = None):
         super().__init__("chapter_writer", self.SYSTEM_PROMPT)
-        # 不在初始化时获取LLM服务，而是在每次调用时动态获取
+        self.novel_id = novel_id
+        # 使用带追踪的LLM服务
         self._llm = None
+        if novel_id:
+            self._llm = TrackedLLMService(
+                provider=LLMProvider.DEEPSEEK,
+                novel_id=novel_id,
+                agent_name="chapter_writer",
+                auto_track=True
+            )
+            set_novel_context(novel_id)
 
     async def process(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -56,8 +69,20 @@ class ChapterWriterAgent(BaseAgent):
                      dialogue_ratio, notes 等信息
         """
         try:
-            novel_id = context.get("novel_id")
+            novel_id = context.get("novel_id") or self.novel_id
             chapter_number = context.get("chapter_number", 1)
+            
+            # 设置追踪上下文
+            if novel_id:
+                set_novel_context(novel_id, chapter_number)
+                # 如果初始化时没有设置LLM，在这里设置
+                if not self._llm:
+                    self._llm = TrackedLLMService(
+                        provider=LLMProvider.DEEPSEEK,
+                        novel_id=novel_id,
+                        agent_name="chapter_writer",
+                        auto_track=True
+                    )
             outline = context.get("outline", {})
             chapter_context = context.get("context", {})
             characters = context.get("characters", [])
@@ -166,6 +191,7 @@ class ChapterWriterAgent(BaseAgent):
                 unresolved_mysteries = chapter_context.get("unresolved_mysteries", [])
                 foreshadowing = chapter_context.get("foreshadowing", [])
                 recent_events = chapter_context.get("recent_events", [])
+                entity_context = chapter_context.get("entity_context", [])
                 
                 if prev_chap:
                     context_parts.append(f"前情提要：{prev_chap}")
@@ -188,6 +214,10 @@ class ChapterWriterAgent(BaseAgent):
                         status_texts.append(text)
                     if status_texts:
                         context_parts.append(f"角色当前状态：{'；'.join(status_texts)}")
+                # ── Entity-Aware RAG: 注入实体状态上下文 ──
+                if entity_context:
+                    entity_text = "\n".join(entity_context)
+                    context_parts.append(f"实体状态追踪（确保角色状态一致性）：\n{entity_text}")
             
             prev_summary = "\n".join(context_parts) if context_parts else ""
             

@@ -1,436 +1,968 @@
-import { useState, useEffect } from 'react'
-import { BookOpen, Play, BarChart3, CheckCircle, XCircle, Clock, FileText, RefreshCw } from 'lucide-react'
+import { useState, useRef, useEffect } from 'react'
+import { evaluationApi } from '../services/api'
 
-// Types
-interface ReferenceNovel {
-  filename: string
+// ─── 类型定义 ───────────────────────────────────────────────
+interface RuleDetail {
+  rule_id: string
   name: string
-  author: string
-  size_kb: number
-  char_count: number
-  word_count: number
+  desc: string
+  answer: 'Yes' | 'No'
+  reason: string
 }
 
-interface DimResult {
+interface DimScore {
   id: string
   name: string
   weight: number
   weight_pct: number
-  total_rules: number
+  score: number
   passed: number
   failed: number
-  score: number
-  bar: string
-  judgments: { rule_id: string; name: string; answer: string; reason: string }[]
-}
-
-interface EvalResult {
-  success: boolean
-  eval_type: string
-  genre: string
-  timestamp: string
-  total_score: number
-  rank: string
-  api_calls: number
-  dims: DimResult[]
   total_rules: number
-  error?: string
+  rules: RuleDetail[]
 }
 
-interface EvalHistory {
-  filename: string
-  timestamp: string
-  eval_type: string
+interface BlockResult {
+  block_index: number
+  original_index: number
+  total_blocks: number
+  text_preview: string
+  text_length: number
+  score: number
+  dims: DimScore[]
+}
+
+interface DimSummary {
+  id: string
+  name: string
+  weight: number
+  weight_pct: number
+  avg_score: number
+  bar: string
+}
+
+interface SampledResult {
+  success: boolean
+  error?: string
   total_score: number
   rank: string
   api_calls: number
+  timestamp: string
+  sampling: {
+    total_blocks_in_text: number
+    sampled_blocks: number
+    max_bytes_per_block: number
+  }
+  dims: DimSummary[]
+  blocks: BlockResult[]
+  total_rules: number
+  history_id?: number
+}
+
+interface ReferenceNovel {
+  filename: string
+  size: number
+  size_kb: number
+}
+
+// 历史记录类型
+interface HistoryItem {
+  id: number
+  source_type: string
+  source_name: string | null
   genre: string
+  total_score: number
+  rank: string
+  num_blocks: number
+  sampled_blocks: number
+  api_calls: number
+  created_at: string
 }
 
-const RANK_COLORS: Record<string, string> = {
-  S: 'bg-yellow-100 text-yellow-800 border-yellow-300',
-  A: 'bg-green-100 text-green-800 border-green-300',
-  B: 'bg-blue-100 text-blue-800 border-blue-300',
-  C: 'bg-gray-100 text-gray-800 border-gray-300',
-  D: 'bg-orange-100 text-orange-800 border-orange-300',
-  F: 'bg-red-100 text-red-800 border-red-300',
+interface HistoryResponse {
+  success: boolean
+  total: number
+  page: number
+  page_size: number
+  total_pages: number
+  data: HistoryItem[]
 }
 
-const RANK_SCORES: Record<string, number> = {
-  S: 90, A: 80, B: 70, C: 60, D: 50, F: 0,
+// ─── 本地存储键名 ───────────────────────────────────────────
+const STORAGE_KEY = 'kimi_evaluation_state'
+
+interface SavedState {
+  result: SampledResult | null
+  params: {
+    inputMode: 'file' | 'text'
+    selectedFile: string
+    customText: string
+    numBlocks: number
+    maxBytesPerBlock: number
+    genre: string
+  }
+  timestamp: number
 }
 
+// 保存状态到本地存储
+const saveState = (state: SavedState) => {
+  try {
+    localStorage.setItem(STORAGE_KEY, JSON.stringify(state))
+  } catch (e) {
+    console.error('保存状态失败:', e)
+  }
+}
+
+// 从本地存储加载状态
+const loadState = (): SavedState | null => {
+  try {
+    const saved = localStorage.getItem(STORAGE_KEY)
+    if (saved) {
+      return JSON.parse(saved)
+    }
+  } catch (e) {
+    console.error('加载状态失败:', e)
+  }
+  return null
+}
+
+// 清除本地存储
+const clearState = () => {
+  try {
+    localStorage.removeItem(STORAGE_KEY)
+  } catch (e) {
+    console.error('清除状态失败:', e)
+  }
+}
+
+// ─── 工具函数 ───────────────────────────────────────────────
+const rankColor: Record<string, string> = {
+  S: 'text-yellow-400',
+  A: 'text-green-400',
+  B: 'text-blue-400',
+  C: 'text-orange-400',
+  D: 'text-red-400',
+  F: 'text-gray-400',
+}
+
+const scoreColor = (score: number) => {
+  if (score >= 8) return 'text-green-400'
+  if (score >= 6) return 'text-blue-400'
+  if (score >= 4) return 'text-orange-400'
+  return 'text-red-400'
+}
+
+const ScoreBar = ({ score, max = 10 }: { score: number; max?: number }) => {
+  const pct = Math.round((score / max) * 100)
+  const color =
+    score >= 8 ? 'bg-green-500' : score >= 6 ? 'bg-blue-500' : score >= 4 ? 'bg-orange-500' : 'bg-red-500'
+  return (
+    <div className="flex items-center gap-2">
+      <div className="flex-1 h-2 bg-gray-700 rounded-full overflow-hidden">
+        <div className={`h-full rounded-full transition-all ${color}`} style={{ width: `${pct}%` }} />
+      </div>
+      <span className={`text-sm font-mono w-8 text-right ${scoreColor(score)}`}>{score}</span>
+    </div>
+  )
+}
+
+// ─── 主组件 ─────────────────────────────────────────────────
 export function Evaluation() {
-  const [references, setReferences] = useState<ReferenceNovel[]>([])
-  const [history, setHistory] = useState<EvalHistory[]>([])
-  const [selectedFile, setSelectedFile] = useState<string>('')
-  const [textContent, setTextContent] = useState<string>('')
-  const [evalType, setEvalType] = useState<'llm' | 'keyword'>('llm')
-  const [loading, setLoading] = useState(false)
-  const [result, setResult] = useState<EvalResult | null>(null)
-  const [tab, setTab] = useState<'reference' | 'history'>('reference')
-  const [expandedDim, setExpandedDim] = useState<string | null>(null)
-  const [apiError, setApiError] = useState<string>('')
+  // 参考小说列表
+  const [novels, setNovels] = useState<ReferenceNovel[]>([])
+  const [novelsLoaded, setNovelsLoaded] = useState(false)
 
-  const apiBase = '/api/v1'
+  // 从本地存储恢复状态
+  const savedState = loadState()
 
-  // Load references
-  const loadReferences = async () => {
+  // 运行状态
+  const [running, setRunning] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [result, setResult] = useState<SampledResult | null>(savedState?.result || null)
+
+  // 流式进度状态
+  const [progress, setProgress] = useState<{
+    currentBlock: number
+    totalBlocks: number
+    apiCalls: number
+    status: string
+  } | null>(null)
+
+  // 使用 ref 保持运行状态，避免闭包问题
+  const abortControllerRef = useRef<AbortController | null>(null)
+
+  // 展开状态
+  const [expandedBlock, setExpandedBlock] = useState<number | null>(null)
+  const [expandedDim, setExpandedDim] = useState<Record<string, boolean>>({})
+
+  // 恢复保存的参数
+  const [inputMode, setInputMode] = useState<'file' | 'text'>(savedState?.params?.inputMode || 'file')
+  const [selectedFile, setSelectedFile] = useState<string>(savedState?.params?.selectedFile || '')
+  const [customText, setCustomText] = useState<string>(savedState?.params?.customText || '')
+  const [numBlocks, setNumBlocks] = useState(savedState?.params?.numBlocks || 5)
+  const [maxBytesPerBlock, setMaxBytesPerBlock] = useState(savedState?.params?.maxBytesPerBlock || 10000)
+  const [genre, setGenre] = useState(savedState?.params?.genre || '玄幻')
+
+  // 历史记录状态
+  const [history, setHistory] = useState<HistoryItem[]>([])
+  const [historyPage, setHistoryPage] = useState(1)
+  const [historyTotalPages, setHistoryTotalPages] = useState(1)
+  const [historyLoading, setHistoryLoading] = useState(false)
+  const [expandedHistory, setExpandedHistory] = useState<number | null>(null)
+  const [historyDetail, setHistoryDetail] = useState<SampledResult | null>(null)
+  const [historyDetailLoading, setHistoryDetailLoading] = useState(false)
+
+  // 加载参考小说列表
+  const loadNovels = async () => {
+    if (novelsLoaded) return
     try {
-      const res = await fetch(`${apiBase}/training/evaluation/references`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('access_token') || ''}` },
-      })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const data = await res.json()
-      setReferences(data.files || [])
+      const res = await evaluationApi.getReferences()
+      setNovels(res.files || [])
+      setNovelsLoaded(true)
     } catch (e: any) {
-      setApiError(`加载参考小说失败: ${e.message}`)
+      setError('加载参考小说失败：' + (e?.response?.data?.detail || e.message))
     }
   }
 
-  // Load history
-  const loadHistory = async () => {
+  // 加载历史记录
+  const loadHistory = async (page: number = 1) => {
+    setHistoryLoading(true)
     try {
-      const res = await fetch(`${apiBase}/training/evaluation/results?limit=20`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('access_token') || ''}` },
-      })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
-      const data = await res.json()
-      setHistory(data.results || [])
-    } catch (e: any) {
-      setApiError(`加载历史失败: ${e.message}`)
-    }
-  }
-
-  useEffect(() => {
-    loadReferences()
-    loadHistory()
-  }, [])
-
-  // Select a reference novel and load its content
-  const selectReference = async (file: ReferenceNovel) => {
-    setSelectedFile(file.filename)
-    setApiError('')
-    // Load text content from reference dir
-    try {
-      const res = await fetch(`${apiBase}/export/reference/${file.filename}`, {
-        headers: { Authorization: `Bearer ${localStorage.getItem('access_token') || ''}` },
-      })
-      if (res.ok) {
-        const blob = await res.blob()
-        const text = await blob.text()
-        setTextContent(text.slice(0, 50000))
-      } else {
-        // Try as plain text
-        const res2 = await fetch(`/reference/${file.filename}`)
-        if (res2.ok) {
-          const text = await res2.text()
-          setTextContent(text.slice(0, 50000))
-        }
+      const res: HistoryResponse = await evaluationApi.getHistory(page, 15)
+      if (res.success) {
+        setHistory(res.data)
+        setHistoryPage(res.page)
+        setHistoryTotalPages(res.total_pages)
       }
-    } catch {
-      setApiError(`无法加载文件内容: ${file.filename}`)
+    } catch (e: any) {
+      console.error('加载历史记录失败:', e)
+    } finally {
+      setHistoryLoading(false)
     }
   }
 
-  // Run evaluation
-  const runEvaluation = async () => {
-    if (!textContent.trim()) {
-      setApiError('请先选择或输入小说文本')
+  // 加载历史记录详情
+  const loadHistoryDetail = async (historyId: number) => {
+    if (expandedHistory === historyId) {
+      setExpandedHistory(null)
+      setHistoryDetail(null)
       return
     }
-    setLoading(true)
-    setApiError('')
-    setResult(null)
+    setHistoryDetailLoading(true)
+    setExpandedHistory(historyId)
     try {
-      const res = await fetch(`${apiBase}/training/evaluation/run`, {
+      const res = await evaluationApi.getHistoryDetail(historyId)
+      if (res.success && res.data?.result_data) {
+        setHistoryDetail(res.data.result_data)
+      }
+    } catch (e: any) {
+      console.error('加载历史记录详情失败:', e)
+    } finally {
+      setHistoryDetailLoading(false)
+    }
+  }
+
+  // 组件挂载时加载历史记录
+  useEffect(() => {
+    loadHistory(1)
+  }, [])
+
+  // 获取评测文本
+  const getEvalText = async (): Promise<string | null> => {
+    if (inputMode === 'text') {
+      if (!customText.trim()) {
+        setError('请输入要评测的文本')
+        return null
+      }
+      return customText.trim()
+    }
+    if (!selectedFile) {
+      setError('请选择一个参考小说文件')
+      return null
+    }
+    try {
+      const data = await evaluationApi.getReferenceContent(selectedFile)
+      return data.content
+    } catch (e: any) {
+      setError('读取文件失败：' + e.message)
+      return null
+    }
+  }
+
+  // 清理函数
+  useEffect(() => {
+    return () => {
+      if (abortControllerRef.current) {
+        abortControllerRef.current.abort()
+      }
+    }
+  }, [])
+
+  // 当结果或参数变化时保存到本地存储
+  useEffect(() => {
+    saveState({
+      result,
+      params: {
+        inputMode,
+        selectedFile,
+        customText,
+        numBlocks,
+        maxBytesPerBlock,
+        genre,
+      },
+      timestamp: Date.now(),
+    })
+  }, [result, inputMode, selectedFile, customText, numBlocks, maxBytesPerBlock, genre])
+
+  // 清除历史结果
+  const handleClearResult = () => {
+    setResult(null)
+    clearState()
+  }
+
+  // 开始评测（流式）
+  const handleRun = async () => {
+    setError(null)
+    setResult(null)
+    setProgress(null)
+    setExpandedBlock(null)
+    setExpandedDim({})
+
+    const text = await getEvalText()
+    if (!text) return
+
+    setRunning(true)
+    abortControllerRef.current = new AbortController()
+
+    try {
+      const token = localStorage.getItem('access_token')
+      const response = await fetch('/api/v1/training/evaluation/run-sampled', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
-          Authorization: `Bearer ${localStorage.getItem('access_token') || ''}`,
+          'Authorization': token ? `Bearer ${token}` : '',
         },
-        body: JSON.stringify({ text: textContent, eval_type: evalType }),
+        body: JSON.stringify({
+          text,
+          num_blocks: numBlocks,
+          max_bytes_per_block: maxBytesPerBlock,
+          eval_type: 'llm',
+          genre,
+          stream: true,
+        }),
+        signal: abortControllerRef.current.signal,
       })
-      const data = await res.json()
-      if (!data.success) throw new Error(data.error || '评测失败')
-      setResult(data)
-      loadHistory() // refresh history
+
+      if (!response.ok) {
+        const errorData = await response.json().catch(() => ({}))
+        throw new Error(errorData.detail || `HTTP ${response.status}`)
+      }
+
+      const reader = response.body?.getReader()
+      if (!reader) {
+        throw new Error('无法读取响应流')
+      }
+
+      const decoder = new TextDecoder()
+      let buffer = ''
+      let finalResult: SampledResult | null = null
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+
+        buffer += decoder.decode(value, { stream: true })
+        const lines = buffer.split('\n')
+        buffer = lines.pop() || ''
+
+        for (const line of lines) {
+          if (!line.trim()) continue
+          try {
+            const event = JSON.parse(line)
+            switch (event.type) {
+              case 'init':
+                setProgress({
+                  currentBlock: 0,
+                  totalBlocks: event.total_blocks || numBlocks,
+                  apiCalls: 0,
+                  status: '初始化完成，开始评测...',
+                })
+                break
+              case 'progress':
+                setProgress({
+                  currentBlock: event.current_block || 0,
+                  totalBlocks: event.total_blocks || numBlocks,
+                  apiCalls: event.api_calls || 0,
+                  status: event.message || `正在评测第 ${event.current_block} 块...`,
+                })
+                break
+              case 'result':
+                finalResult = event.data
+                setProgress(prev => prev ? { ...prev, status: '评测完成！' } : null)
+                break
+              case 'error':
+                throw new Error(event.error || '评测过程中出错')
+            }
+          } catch (e) {
+            console.error('解析事件失败:', line, e)
+          }
+        }
+      }
+
+      if (finalResult) {
+        setResult(finalResult)
+        // 结果已自动保存到 localStorage
+        // 刷新历史记录列表
+        loadHistory(1)
+      } else {
+        setError('评测未完成，未收到结果')
+      }
     } catch (e: any) {
-      setApiError(e.message)
+      if (e.name === 'AbortError') {
+        setError('评测已取消')
+      } else {
+        setError(e.message || '请求失败')
+      }
     } finally {
-      setLoading(false)
+      setRunning(false)
+      setProgress(null)
+      abortControllerRef.current = null
     }
   }
 
-  // Rank badge
-  const RankBadge = ({ rank, score }: { rank: string; score: number }) => (
-    <span className={`inline-flex items-center gap-1 px-3 py-1 rounded-full border font-bold text-lg ${RANK_COLORS[rank] || ''}`}>
-      {rank} <span className="text-sm font-normal">{score.toFixed(1)}</span>
-    </span>
-  )
+  // 取消评测
+  const handleCancel = () => {
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+    }
+  }
 
-  // Score bar
-  const ScoreBar = ({ score, label, weight, passed, total }: { score: number; label: string; weight: number; passed: number; total: number }) => (
-    <div className="mb-3">
-      <div className="flex justify-between text-sm mb-1">
-        <span className="font-medium">{label}</span>
-        <span>
-          <span className="font-bold text-lg">{score.toFixed(1)}</span>
-          <span className="text-gray-400 text-xs"> /10</span>
-          <span className="ml-2 text-gray-500 text-xs">({passed}/{total})</span>
-          <span className="ml-2 text-gray-400 text-xs">{weight.toFixed(0)}%权重</span>
-        </span>
-      </div>
-      <div className="h-3 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
-        <div
-          className="h-full rounded-full transition-all duration-700"
-          style={{
-            width: `${score * 10}%`,
-            background: score >= 8 ? '#22c55e' : score >= 6 ? '#3b82f6' : score >= 4 ? '#f59e0b' : '#ef4444',
-          }}
-        />
-      </div>
-    </div>
-  )
+  const toggleDim = (key: string) =>
+    setExpandedDim(prev => ({ ...prev, [key]: !prev[key] }))
 
+  // ─── 渲染 ────────────────────────────────────────────────
   return (
-    <div className="max-w-6xl mx-auto">
-      {/* Header */}
-      <div className="flex items-center gap-3 mb-6">
-        <BarChart3 className="h-8 w-8 text-primary-600" />
-        <div>
-          <h1 className="text-2xl font-bold">八维 LLM Rubric 评测</h1>
-          <p className="text-sm text-gray-500">基于 KimiFiction 8 维度 88 条规则的大模型评测系统</p>
+    <div className="min-h-screen bg-gray-950 text-gray-100 p-6">
+      <div className="max-w-5xl mx-auto space-y-6">
+
+        {/* 标题 */}
+        <div className="flex items-start justify-between">
+          <div>
+            <h1 className="text-2xl font-bold text-white">📊 小说质量评测</h1>
+            <p className="text-gray-400 text-sm mt-1">
+              从小说中均匀采样文本块，逐块进行八维 LLM Rubric 评测
+            </p>
+          </div>
+          <a
+            href="/evaluation/optimizer"
+            className="px-4 py-2 bg-indigo-600 hover:bg-indigo-500 text-white rounded-lg text-sm flex items-center gap-2"
+          >
+            <span>✨</span>
+            规则优化
+          </a>
         </div>
-      </div>
 
-      {/* Error */}
-      {apiError && (
-        <div className="mb-4 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg text-red-700 dark:text-red-300 text-sm">
-          {apiError}
-        </div>
-      )}
+        {/* ── 输入区 ── */}
+        <div className="bg-gray-900 rounded-xl border border-gray-800 p-5 space-y-4">
+          <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">评测文本来源</h2>
 
-      {/* Tabs */}
-      <div className="flex gap-1 mb-4 bg-gray-100 dark:bg-gray-800 p-1 rounded-lg w-fit">
-        <button
-          onClick={() => setTab('reference')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-            tab === 'reference' ? 'bg-white dark:bg-gray-700 shadow-sm' : 'hover:bg-gray-200 dark:hover:bg-gray-700'
-          }`}
-        >
-          <BookOpen className="h-4 w-4" />
-          选择小说
-        </button>
-        <button
-          onClick={() => setTab('history')}
-          className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
-            tab === 'history' ? 'bg-white dark:bg-gray-700 shadow-sm' : 'hover:bg-gray-200 dark:hover:bg-gray-700'
-          }`}
-        >
-          <Clock className="h-4 w-4" />
-          历史记录 ({history.length})
-        </button>
-      </div>
+          {/* 模式切换 */}
+          <div className="flex gap-2">
+            {(['file', 'text'] as const).map(mode => (
+              <button
+                key={mode}
+                onClick={() => setInputMode(mode)}
+                className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors ${
+                  inputMode === mode
+                    ? 'bg-indigo-600 text-white'
+                    : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
+                }`}
+              >
+                {mode === 'file' ? '📁 参考小说' : '✏️ 粘贴文本'}
+              </button>
+            ))}
+          </div>
 
-      {/* Reference Tab */}
-      {tab === 'reference' && (
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Left: file list */}
-          <div className="lg:col-span-1">
-            <h3 className="text-sm font-semibold text-gray-500 uppercase mb-3">参考小说库</h3>
-            <div className="space-y-2 max-h-[500px] overflow-y-auto">
-              {references.length === 0 && (
-                <p className="text-sm text-gray-400 py-4 text-center">暂无参考小说，请将 .txt 文件放入 reference 目录</p>
-              )}
-              {references.map((r) => (
-                <button
-                  key={r.filename}
-                  onClick={() => selectReference(r)}
-                  className={`w-full text-left p-3 rounded-lg border transition-colors ${
-                    selectedFile === r.filename
-                      ? 'border-primary-500 bg-primary-50 dark:bg-primary-900/20'
-                      : 'border-gray-200 dark:border-gray-700 hover:border-primary-300 hover:bg-gray-50 dark:hover:bg-gray-800'
-                  }`}
+          {inputMode === 'file' ? (
+            <div className="space-y-2">
+              <button
+                onClick={loadNovels}
+                className="text-xs text-indigo-400 hover:text-indigo-300 underline"
+              >
+                {novelsLoaded ? `已加载 ${novels.length} 部小说` : '点击加载参考小说列表'}
+              </button>
+              {novels.length > 0 && (
+                <select
+                  value={selectedFile}
+                  onChange={e => setSelectedFile(e.target.value)}
+                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-indigo-500"
                 >
-                  <div className="font-medium text-sm truncate">{r.name}</div>
-                  <div className="text-xs text-gray-500 mt-1">
-                    {r.author !== '?' ? `作者: ${r.author} · ` : ''}{r.size_kb}KB · {r.word_count}字
+                  <option value="">— 选择小说文件 —</option>
+                  {novels.map(n => (
+                    <option key={n.filename} value={n.filename}>
+                      {n.filename}（{n.size_kb} KB）
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
+          ) : (
+            <textarea
+              value={customText}
+              onChange={e => setCustomText(e.target.value)}
+              placeholder="粘贴小说文本（建议 5 万字以上效果更好）..."
+              rows={8}
+              className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-indigo-500 resize-y font-mono"
+            />
+          )}
+        </div>
+
+        {/* ── 采样参数 ── */}
+        <div className="bg-gray-900 rounded-xl border border-gray-800 p-5 space-y-5">
+          <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">采样参数</h2>
+
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+            {/* 采样块数 */}
+            <div className="space-y-2">
+              <div className="flex justify-between text-sm">
+                <label className="text-gray-400">采样块数</label>
+                <span className="text-indigo-400 font-mono font-bold">{numBlocks}</span>
+              </div>
+              <input
+                type="range"
+                min={1}
+                max={20}
+                value={numBlocks}
+                onChange={e => setNumBlocks(Number(e.target.value))}
+                className="w-full accent-indigo-500"
+              />
+              <div className="flex justify-between text-xs text-gray-600">
+                <span>1（快速）</span>
+                <span>20（精细）</span>
+              </div>
+              <p className="text-xs text-gray-500">从全文均匀抽取 {numBlocks} 个文本块进行评测</p>
+            </div>
+
+            {/* 每块最大字节 */}
+            <div className="space-y-2">
+              <div className="flex justify-between text-sm">
+                <label className="text-gray-400">每块最大字节</label>
+                <span className="text-indigo-400 font-mono font-bold">
+                  {maxBytesPerBlock >= 1000 ? `${(maxBytesPerBlock / 1000).toFixed(0)}K` : maxBytesPerBlock}
+                </span>
+              </div>
+              <input
+                type="range"
+                min={3000}
+                max={30000}
+                step={1000}
+                value={maxBytesPerBlock}
+                onChange={e => setMaxBytesPerBlock(Number(e.target.value))}
+                className="w-full accent-indigo-500"
+              />
+              <div className="flex justify-between text-xs text-gray-600">
+                <span>3K（精准）</span>
+                <span>30K（宽泛）</span>
+              </div>
+              <p className="text-xs text-gray-500">约 {Math.round(maxBytesPerBlock / 3)} 汉字，以句号为边界截断</p>
+            </div>
+
+            {/* 题材 */}
+            <div className="space-y-2">
+              <label className="text-sm text-gray-400">小说题材</label>
+              <select
+                value={genre}
+                onChange={e => setGenre(e.target.value)}
+                className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-indigo-500"
+              >
+                {['玄幻', '仙侠', '都市', '历史', '科幻', '悬疑', '言情', '武侠'].map(g => (
+                  <option key={g} value={g}>{g}</option>
+                ))}
+              </select>
+              <p className="text-xs text-gray-500">影响评测规则的侧重方向</p>
+            </div>
+          </div>
+        </div>
+
+        {/* ── 运行按钮 ── */}
+        <div className="flex items-center gap-4">
+          <button
+            onClick={handleRun}
+            disabled={running}
+            className={`px-8 py-3 rounded-xl font-semibold text-base transition-all ${
+              running
+                ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
+                : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-900/40'
+            }`}
+          >
+            {running ? '⏳ 评测中...' : result ? '🔄 重新评测' : '🚀 开始评测'}
+          </button>
+          {running && (
+            <button
+              onClick={handleCancel}
+              className="px-4 py-2 rounded-lg text-sm bg-red-900/50 text-red-400 hover:bg-red-900/70 transition-colors"
+            >
+              取消
+            </button>
+          )}
+          {result && !running && (
+            <button
+              onClick={handleClearResult}
+              className="px-4 py-2 rounded-lg text-sm bg-gray-800 text-gray-400 hover:bg-gray-700 transition-colors"
+            >
+              清除结果
+            </button>
+          )}
+        </div>
+
+        {/* ── 历史结果提示 ── */}
+        {result && !running && (
+          <div className="bg-green-950/30 border border-green-800/50 rounded-lg p-3">
+            <div className="flex items-center gap-2 text-sm text-green-400">
+              <span>✓</span>
+              <span>
+                显示上次评测结果（{new Date(savedState?.timestamp || Date.now()).toLocaleString()}）
+              </span>
+            </div>
+          </div>
+        )}
+
+        {/* ── 进度显示 ── */}
+        {running && progress && (
+          <div className="bg-indigo-950/30 border border-indigo-800/50 rounded-xl p-4 space-y-3">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-indigo-300">{progress.status}</span>
+              <span className="text-xs text-indigo-400 font-mono">
+                API 调用: {progress.apiCalls}
+              </span>
+            </div>
+            {progress.totalBlocks > 0 && (
+              <div className="space-y-1">
+                <div className="flex justify-between text-xs text-gray-500">
+                  <span>进度</span>
+                  <span>{progress.currentBlock} / {progress.totalBlocks} 块</span>
+                </div>
+                <div className="h-2 bg-gray-800 rounded-full overflow-hidden">
+                  <div
+                    className="h-full bg-indigo-500 rounded-full transition-all duration-300"
+                    style={{
+                      width: `${Math.round((progress.currentBlock / progress.totalBlocks) * 100)}%`
+                    }}
+                  />
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* ── 错误提示 ── */}
+        {error && (
+          <div className="bg-red-950 border border-red-800 rounded-xl p-4 text-red-300 text-sm">
+            ❌ {error}
+          </div>
+        )}
+
+        {/* ── 结果区 ── */}
+        {result && (
+          <div className="space-y-6">
+
+            {/* 总分卡片 */}
+            <div className="bg-gray-900 rounded-xl border border-gray-800 p-6">
+              <div className="flex items-start justify-between">
+                <div>
+                  <h2 className="text-lg font-bold text-white mb-1">评测结果</h2>
+                  <p className="text-xs text-gray-500">
+                    共 {result.sampling.total_blocks_in_text} 个文本块 · 采样 {result.sampling.sampled_blocks} 块 ·
+                    每块最大 {(result.sampling.max_bytes_per_block / 1000).toFixed(0)}K 字节 ·
+                    调用 API {result.api_calls} 次
+                  </p>
+                </div>
+                <div className="text-right">
+                  <div className={`text-6xl font-black ${rankColor[result.rank] || 'text-gray-400'}`}>
+                    {result.rank}
                   </div>
-                </button>
+                  <div className={`text-2xl font-bold mt-1 ${scoreColor(result.total_score / 10)}`}>
+                    {result.total_score} <span className="text-sm text-gray-500">/ 10</span>
+                  </div>
+                </div>
+              </div>
+
+              {/* 各维度汇总 */}
+              <div className="mt-5 grid grid-cols-1 md:grid-cols-2 gap-3">
+                {result.dims.map(dim => (
+                  <div key={dim.id} className="space-y-1">
+                    <div className="flex justify-between text-xs text-gray-400">
+                      <span>{dim.name}</span>
+                      <span className="text-gray-500">{dim.weight_pct}%</span>
+                    </div>
+                    <ScoreBar score={dim.avg_score} />
+                  </div>
+                ))}
+              </div>
+            </div>
+
+            {/* 逐块结果 */}
+            <div className="space-y-3">
+              <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">
+                逐块详细结果（{result.blocks.length} 块）
+              </h2>
+
+              {result.blocks.map(block => (
+                <div
+                  key={block.block_index}
+                  className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden"
+                >
+                  {/* 块头部 */}
+                  <button
+                    onClick={() =>
+                      setExpandedBlock(expandedBlock === block.block_index ? null : block.block_index)
+                    }
+                    className="w-full flex items-center justify-between p-4 hover:bg-gray-800/50 transition-colors text-left"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="text-xs bg-gray-800 text-gray-400 px-2 py-0.5 rounded font-mono">
+                        块 {block.block_index}/{block.total_blocks}
+                      </span>
+                      <span className="text-xs text-gray-500">
+                        原文第 {block.original_index + 1} 块 · {block.text_length} 字符
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-3">
+                      <span className={`text-lg font-bold font-mono ${scoreColor(block.score / 10)}`}>
+                        {block.score}
+                      </span>
+                      <span className="text-gray-600 text-sm">
+                        {expandedBlock === block.block_index ? '▲' : '▼'}
+                      </span>
+                    </div>
+                  </button>
+
+                  {/* 块详情 */}
+                  {expandedBlock === block.block_index && (
+                    <div className="border-t border-gray-800 p-4 space-y-4">
+                      {/* 文本预览 */}
+                      <div className="bg-gray-950 rounded-lg p-3">
+                        <p className="text-xs text-gray-500 mb-2">文本预览</p>
+                        <p className="text-sm text-gray-300 leading-relaxed font-serif whitespace-pre-wrap">
+                          {block.text_preview}
+                        </p>
+                      </div>
+
+                      {/* 各维度得分 */}
+                      <div className="space-y-2">
+                        {block.dims.map(dim => {
+                          const dimKey = `${block.block_index}-${dim.id}`
+                          return (
+                            <div key={dim.id} className="border border-gray-800 rounded-lg overflow-hidden">
+                              {/* 维度头 */}
+                              <button
+                                onClick={() => toggleDim(dimKey)}
+                                className="w-full flex items-center justify-between px-4 py-2.5 hover:bg-gray-800/40 transition-colors text-left"
+                              >
+                                <div className="flex items-center gap-3 flex-1">
+                                  <span className="text-sm text-gray-300 font-medium w-24">{dim.name}</span>
+                                  <div className="flex-1 max-w-xs">
+                                    <ScoreBar score={dim.score} />
+                                  </div>
+                                </div>
+                                <div className="flex items-center gap-3 ml-4">
+                                  <span className="text-xs text-gray-500">
+                                    {dim.passed}/{dim.total_rules} 通过
+                                  </span>
+                                  <span className="text-gray-600 text-xs">
+                                    {expandedDim[dimKey] ? '▲' : '▼'}
+                                  </span>
+                                </div>
+                              </button>
+
+                              {/* 规则详情 */}
+                              {expandedDim[dimKey] && (
+                                <div className="border-t border-gray-800 divide-y divide-gray-800/50">
+                                  {dim.rules.map(rule => (
+                                    <div key={rule.rule_id} className="px-4 py-2.5 flex gap-3">
+                                      <span
+                                        className={`text-xs font-bold mt-0.5 w-8 shrink-0 ${
+                                          rule.answer === 'Yes' ? 'text-green-400' : 'text-red-400'
+                                        }`}
+                                      >
+                                        {rule.answer === 'Yes' ? '✓' : '✗'}
+                                      </span>
+                                      <div className="flex-1 min-w-0">
+                                        <div className="flex items-center gap-2">
+                                          <span className="text-xs text-gray-500 font-mono">{rule.rule_id}</span>
+                                          <span className="text-sm text-gray-300">{rule.name}</span>
+                                        </div>
+                                        {rule.reason && (
+                                          <p className="text-xs text-gray-500 mt-0.5 leading-relaxed">
+                                            {rule.reason}
+                                          </p>
+                                        )}
+                                      </div>
+                                    </div>
+                                  ))}
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
+                </div>
               ))}
             </div>
           </div>
+        )}
 
-          {/* Middle: text + controls */}
-          <div className="lg:col-span-2 space-y-4">
-            {/* Controls */}
-            <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
-              <div className="flex flex-wrap items-center gap-3 mb-4">
-                <span className="text-sm font-medium text-gray-600 dark:text-gray-300">评测模式:</span>
-                <label className="flex items-center gap-2 text-sm">
-                  <input
-                    type="radio"
-                    checked={evalType === 'llm'}
-                    onChange={() => setEvalType('llm')}
-                    className="accent-primary-600"
-                  />
-                  LLM 评测（DeepSeek，逐条判断 Yes/No）
-                </label>
-                <label className="flex items-center gap-2 text-sm text-gray-400">
-                  <input
-                    type="radio"
-                    checked={evalType === 'keyword'}
-                    onChange={() => setEvalType('keyword')}
-                    className="accent-gray-400"
-                    disabled
-                  />
-                  关键词评测（开发中）
-                </label>
-              </div>
-
-              {selectedFile && (
-                <div className="text-sm text-gray-500 mb-3 flex items-center gap-2">
-                  <FileText className="h-4 w-4" />
-                  已选择: <span className="font-medium">{selectedFile}</span>
-                  <span className="text-gray-400">({textContent.length} 字)</span>
-                </div>
-              )}
-
-              <button
-                onClick={runEvaluation}
-                disabled={loading || !textContent.trim()}
-                className="flex items-center gap-2 px-5 py-2.5 bg-primary-600 hover:bg-primary-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors"
-              >
-                {loading ? (
-                  <>
-                    <RefreshCw className="h-4 w-4 animate-spin" />
-                    评测中... (约需 2-5 分钟，88 条规则)
-                  </>
-                ) : (
-                  <>
-                    <Play className="h-4 w-4" />
-                    开始评测
-                  </>
-                )}
-              </button>
-            </div>
-
-            {/* Text preview */}
-            {textContent && (
-              <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-4">
-                <h4 className="text-sm font-semibold text-gray-500 uppercase mb-2">文本预览</h4>
-                <pre className="text-sm text-gray-600 dark:text-gray-300 whitespace-pre-wrap line-clamp-20 font-mono">
-                  {textContent.slice(0, 2000)}...
-                </pre>
-                <p className="text-xs text-gray-400 mt-2">共 {textContent.length} 字，用于评测: {Math.min(textContent.length, 20000)} 字</p>
-              </div>
-            )}
-
-            {/* Result */}
-            {result && result.success && (
-              <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 p-6">
-                {/* Summary */}
-                <div className="flex flex-wrap items-center gap-4 mb-6 pb-4 border-b border-gray-200 dark:border-gray-700">
-                  <div className="text-4xl font-bold text-gray-900 dark:text-white">{result.total_score.toFixed(1)}</div>
-                  <div className="text-gray-400">/ 100</div>
-                  <RankBadge rank={result.rank} score={result.total_score} />
-                  <div className="text-sm text-gray-500 ml-auto">
-                    {result.api_calls > 0 && `API 调用: ${result.api_calls}次`}
-                    {result.timestamp && ` · ${result.timestamp}`}
-                  </div>
-                </div>
-
-                {/* Dimension bars */}
-                <h3 className="text-sm font-semibold text-gray-500 uppercase mb-4">各维度得分</h3>
-                {[...result.dims]
-                  .sort((a, b) => b.weight - a.weight)
-                  .forEach((dim) => (
-                    <div key={dim.id} className="mb-4">
-                      <ScoreBar
-                        score={dim.score}
-                        label={dim.name}
-                        weight={dim.weight * 100}
-                        passed={dim.passed}
-                        total={dim.total_rules}
-                      />
-                      <button
-                        onClick={() => setExpandedDim(expandedDim === dim.id ? null : dim.id)}
-                        className="text-xs text-primary-600 hover:text-primary-700 ml-1"
-                      >
-                        {expandedDim === dim.id ? '收起规则' : `查看 ${dim.total_rules} 条规则`}
-                      </button>
-                      {expandedDim === dim.id && (
-                        <div className="mt-2 space-y-1">
-                          {dim.judgments.map((j) => (
-                            <div key={j.rule_id} className="flex items-start gap-2 text-xs py-1 px-2 rounded bg-gray-50 dark:bg-gray-900">
-                              {j.answer.toLowerCase() === 'yes' ? (
-                                <CheckCircle className="h-3.5 w-3.5 text-green-500 mt-0.5 shrink-0" />
-                              ) : (
-                                <XCircle className="h-3.5 w-3.5 text-red-400 mt-0.5 shrink-0" />
-                              )}
-                              <div>
-                                <span className="font-medium text-gray-700 dark:text-gray-300">{j.name}</span>
-                                <span className="ml-2 text-gray-400">[{j.rule_id}]</span>
-                                {j.reason && <div className="text-gray-400 mt-0.5">{j.reason}</div>}
-                              </div>
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </div>
-                  ))}
-              </div>
-            )}
-          </div>
-        </div>
-      )}
-
-      {/* History Tab */}
-      {tab === 'history' && (
-        <div>
-          <div className="flex items-center justify-between mb-4">
-            <h3 className="text-sm font-semibold text-gray-500 uppercase">最近评测记录</h3>
-            <button onClick={loadHistory} className="text-sm text-primary-600 hover:text-primary-700 flex items-center gap-1">
-              <RefreshCw className="h-3.5 w-3.5" /> 刷新
+        {/* ── 历史记录区 ── */}
+        <div className="space-y-4">
+          <div className="flex items-center justify-between">
+            <h2 className="text-lg font-bold text-white">📚 评测历史</h2>
+            <button
+              onClick={() => loadHistory(historyPage)}
+              disabled={historyLoading}
+              className="text-xs text-indigo-400 hover:text-indigo-300 disabled:text-gray-600"
+            >
+              {historyLoading ? '加载中...' : '刷新'}
             </button>
           </div>
-          {history.length === 0 ? (
-            <p className="text-sm text-gray-400 py-8 text-center">暂无评测记录</p>
-          ) : (
-            <div className="bg-white dark:bg-gray-800 rounded-lg border border-gray-200 dark:border-gray-700 overflow-hidden">
-              <table className="w-full text-sm">
-                <thead className="bg-gray-50 dark:bg-gray-900">
-                  <tr>
-                    <th className="text-left px-4 py-3 font-medium text-gray-500">时间</th>
-                    <th className="text-left px-4 py-3 font-medium text-gray-500">模式</th>
-                    <th className="text-left px-4 py-3 font-medium text-gray-500">类型</th>
-                    <th className="text-center px-4 py-3 font-medium text-gray-500">总分</th>
-                    <th className="text-center px-4 py-3 font-medium text-gray-500">等级</th>
-                    <th className="text-center px-4 py-3 font-medium text-gray-500">API调用</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
-                  {history.map((h, i) => (
-                    <tr key={i} className="hover:bg-gray-50 dark:hover:bg-gray-700/50">
-                      <td className="px-4 py-3 text-gray-600 dark:text-gray-400 font-mono text-xs">{h.timestamp}</td>
-                      <td className="px-4 py-3">
-                        <span className={`px-2 py-0.5 rounded text-xs font-medium ${
-                          h.eval_type === 'llm' ? 'bg-blue-100 text-blue-700' : 'bg-gray-100 text-gray-600'
-                        }`}>{h.eval_type.toUpperCase()}</span>
-                      </td>
-                      <td className="px-4 py-3 text-gray-600 dark:text-gray-400">{h.genre || '-'}</td>
-                      <td className="px-4 py-3 text-center font-bold">{h.total_score.toFixed(1)}</td>
-                      <td className="px-4 py-3 text-center"><RankBadge rank={h.rank} score={h.total_score} /></td>
-                      <td className="px-4 py-3 text-center text-gray-400">{h.api_calls}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+
+          {history.length === 0 && !historyLoading ? (
+            <div className="text-center py-8 text-gray-500 text-sm">
+              暂无评测历史记录
             </div>
+          ) : (
+            <>
+              {/* 历史记录列表 */}
+              <div className="space-y-3">
+                {history.map((item) => (
+                  <div
+                    key={item.id}
+                    className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden"
+                  >
+                    {/* 历史记录头部 */}
+                    <button
+                      onClick={() => loadHistoryDetail(item.id)}
+                      className="w-full flex items-center justify-between p-4 hover:bg-gray-800/50 transition-colors text-left"
+                    >
+                      <div className="flex items-center gap-4 flex-1">
+                        <span className={`text-2xl font-black ${rankColor[item.rank] || 'text-gray-400'}`}>
+                          {item.rank}
+                        </span>
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2">
+                            <span className="text-sm text-gray-300 truncate">
+                              {item.source_name || '未命名评测'}
+                            </span>
+                            <span className="text-xs bg-gray-800 text-gray-500 px-2 py-0.5 rounded">
+                              {item.genre}
+                            </span>
+                          </div>
+                          <div className="text-xs text-gray-500 mt-1">
+                            {new Date(item.created_at).toLocaleString()} ·
+                            采样 {item.sampled_blocks}/{item.num_blocks} 块 ·
+                            API调用 {item.api_calls} 次
+                          </div>
+                        </div>
+                      </div>
+                      <div className="flex items-center gap-4">
+                        <span className={`text-xl font-bold ${scoreColor(item.total_score / 10)}`}>
+                          {item.total_score}
+                        </span>
+                        <span className="text-gray-600 text-sm">
+                          {expandedHistory === item.id ? '▲' : '▼'}
+                        </span>
+                      </div>
+                    </button>
+
+                    {/* 历史记录详情 */}
+                    {expandedHistory === item.id && (
+                      <div className="border-t border-gray-800 p-4">
+                        {historyDetailLoading ? (
+                          <div className="text-center py-4 text-gray-500 text-sm">
+                            加载详情中...
+                          </div>
+                        ) : historyDetail ? (
+                          <div className="space-y-4">
+                            {/* 维度得分 */}
+                            <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                              {historyDetail.dims?.map((dim: DimSummary) => (
+                                <div key={dim.id} className="space-y-1">
+                                  <div className="flex justify-between text-xs text-gray-400">
+                                    <span>{dim.name}</span>
+                                    <span className="text-gray-500">{dim.weight_pct}%</span>
+                                  </div>
+                                  <ScoreBar score={dim.avg_score} />
+                                </div>
+                              ))}
+                            </div>
+
+                            {/* 块结果摘要 */}
+                            {historyDetail.blocks && historyDetail.blocks.length > 0 && (
+                              <div className="mt-4">
+                                <p className="text-xs text-gray-500 mb-2">
+                                  共 {historyDetail.blocks.length} 个采样块
+                                </p>
+                                <div className="space-y-2">
+                                  {historyDetail.blocks.map((block: BlockResult) => (
+                                    <div
+                                      key={block.block_index}
+                                      className="bg-gray-950 rounded-lg p-3 text-sm"
+                                    >
+                                      <div className="flex items-center justify-between mb-2">
+                                        <span className="text-xs text-gray-500">
+                                          块 {block.block_index}/{block.total_blocks} · 原文第 {block.original_index + 1} 块
+                                        </span>
+                                        <span className={`font-bold ${scoreColor(block.score / 10)}`}>
+                                          {block.score}
+                                        </span>
+                                      </div>
+                                      <p className="text-xs text-gray-400 line-clamp-2">
+                                        {block.text_preview}
+                                      </p>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        ) : (
+                          <div className="text-center py-4 text-gray-500 text-sm">
+                            无法加载详情
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              {/* 分页控件 */}
+              {historyTotalPages > 1 && (
+                <div className="flex items-center justify-center gap-2 pt-4">
+                  <button
+                    onClick={() => loadHistory(historyPage - 1)}
+                    disabled={historyPage <= 1 || historyLoading}
+                    className="px-3 py-1.5 rounded-lg text-sm bg-gray-800 text-gray-300 hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    上一页
+                  </button>
+                  <span className="text-sm text-gray-400">
+                    {historyPage} / {historyTotalPages}
+                  </span>
+                  <button
+                    onClick={() => loadHistory(historyPage + 1)}
+                    disabled={historyPage >= historyTotalPages || historyLoading}
+                    className="px-3 py-1.5 rounded-lg text-sm bg-gray-800 text-gray-300 hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
+                  >
+                    下一页
+                  </button>
+                </div>
+              )}
+            </>
           )}
         </div>
-      )}
+      </div>
     </div>
   )
 }

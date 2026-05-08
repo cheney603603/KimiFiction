@@ -260,6 +260,88 @@ export interface NovelSettings {
   style_reference?: string
 }
 
+export interface PowerSystem {
+  name: string
+  description?: string
+  levels?: string[]
+  limitations?: string[]
+}
+
+export interface SocialStructure {
+  hierarchy?: string[]
+  factions?: string[]
+  organizations?: string[]
+  [key: string]: unknown
+}
+
+export interface Geography {
+  regions?: string[]
+  landmarks?: string[]
+  map_summary?: string
+  [key: string]: unknown
+}
+
+export interface Culture {
+  beliefs?: string[]
+  customs?: string[]
+  taboos?: string[]
+  [key: string]: unknown
+}
+
+export interface KeyRule {
+  rule: string
+  description?: string
+  consequence?: string
+}
+
+export interface Conflict {
+  name: string
+  type?: string
+  description?: string
+}
+
+export interface CoreConflict {
+  name: string
+  type?: string
+  description?: string
+  stakes?: string
+}
+
+export interface Foreshadowing {
+  title: string
+  setup?: string
+  payoff?: string
+  resolution?: Record<string, unknown>
+}
+
+export interface Mystery {
+  title: string
+  question?: string
+  clues?: string[]
+  answer?: string
+}
+
+export interface ChapterHook {
+  chapter_number?: number
+  hook: string
+  purpose?: string
+}
+
+export interface PlotRhythm {
+  opening?: string
+  development?: string
+  climax?: string
+  ending?: string
+  [key: string]: unknown
+}
+
+export interface CharacterArc {
+  character_name: string
+  start_state?: string
+  end_state?: string
+  milestones?: string[]
+}
+
 // 世界观设定
 export interface WorldSetting {
   world_name: string

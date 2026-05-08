@@ -8,6 +8,7 @@ from app.models.chapter import Chapter
 from app.models.character import Character
 from app.models.outline import Outline
 from app.models.memory_node import MemoryNode
+from app.models.entity import Entity, EntityRelationship
 from app.models.feedback import ChapterFeedback, FrameworkAdjustment, WritingSession
 from app.models.rubric import (
     RubricTemplate,
@@ -16,6 +17,7 @@ from app.models.rubric import (
     TrainingEpisode,
     TrainingBatch,
     ComparisonReport,
+    SampledEvaluationHistory,
 )
 
 __all__ = [
@@ -25,6 +27,8 @@ __all__ = [
     "Character", 
     "Outline", 
     "MemoryNode",
+    "Entity",
+    "EntityRelationship",
     "ChapterFeedback",
     "FrameworkAdjustment",
     "WritingSession",
@@ -35,4 +39,5 @@ __all__ = [
     "TrainingEpisode",
     "TrainingBatch",
     "ComparisonReport",
+    "SampledEvaluationHistory",
 ]

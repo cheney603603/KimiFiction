@@ -1,6 +1,6 @@
 import React from 'react'
-import { useNavigate } from 'react-router-dom'
-import { trainingApi, pipelineApi } from '../services/api'
+// import { useNavigate } from 'react-router-dom'
+import { pipelineApi } from '../services/api'
 
 // 类型定义（与后端对齐）
 interface PipelineConfig {
@@ -29,10 +29,11 @@ interface StageResult {
   duration_seconds?: number
   metrics: Record<string, any>
   sample_outputs?: Array<Record<string, any>>
+  mode?: 'real' | 'simulated'
 }
 
 export const TrainingDashboard: React.FC = () => {
-  const navigate = useNavigate()
+  // const navigate = useNavigate()  // 暂不使用
   
   // 状态管理
   const [config, setConfig] = React.useState<PipelineConfig>({

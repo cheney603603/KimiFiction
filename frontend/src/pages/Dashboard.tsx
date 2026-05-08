@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
-import { Plus, BookOpen, ChevronRight, Loader2 } from 'lucide-react'
+import { Plus, BookOpen, ChevronRight, Loader2, Trash2, AlertTriangle } from 'lucide-react'
 import { Link } from 'react-router-dom'
 import { novelApi } from '../services/api'
 import type { Novel } from '../types'
@@ -9,6 +9,10 @@ export function Dashboard() {
   const queryClient = useQueryClient()
   const [isCreating, setIsCreating] = useState(false)
   const [newNovelTitle, setNewNovelTitle] = useState('')
+
+  // 删除确认弹窗状态
+  const [deleteTarget, setDeleteTarget] = useState<Novel | null>(null)
+  const [deleteConfirmText, setDeleteConfirmText] = useState('')
 
   const { data: novelsData, isLoading, error } = useQuery({
     queryKey: ['novels'],
@@ -22,6 +26,15 @@ export function Dashboard() {
       queryClient.invalidateQueries({ queryKey: ['novels'] })
       setIsCreating(false)
       setNewNovelTitle('')
+    },
+  })
+
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => novelApi.hardDelete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['novels'] })
+      setDeleteTarget(null)
+      setDeleteConfirmText('')
     },
   })
 
@@ -151,25 +164,40 @@ export function Dashboard() {
       ) : (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
           {novels.map((novel: Novel) => (
-            <Link
+            <div
               key={novel.id}
-              to={`/novel/${novel.id}`}
               className="group bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-6 hover:shadow-md transition-all"
             >
               <div className="flex justify-between items-start mb-4">
                 <div className="flex-1 min-w-0">
-                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white truncate group-hover:text-primary-600 transition-colors">
+                  <Link
+                    to={`/novel/${novel.id}`}
+                    className="text-lg font-semibold text-gray-900 dark:text-white truncate group-hover:text-primary-600 transition-colors block"
+                  >
                     {novel.title}
-                  </h3>
+                  </Link>
                   {novel.genre && (
                     <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
                       {novel.genre}
                     </p>
                   )}
                 </div>
-                <span className={`px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(novel.status)}`}>
-                  {getStatusText(novel.status)}
-                </span>
+                <div className="flex items-center gap-2 shrink-0 ml-2">
+                  <span className={`px-2 py-1 text-xs font-medium rounded-full ${getStatusColor(novel.status)}`}>
+                    {getStatusText(novel.status)}
+                  </span>
+                  <button
+                    onClick={(e) => {
+                      e.preventDefault()
+                      e.stopPropagation()
+                      setDeleteTarget(novel)
+                    }}
+                    className="p-1.5 text-gray-400 hover:text-red-500 hover:bg-red-50 dark:hover:bg-red-900/30 rounded-md transition-colors"
+                    title="彻底删除小说"
+                  >
+                    <Trash2 className="h-4 w-4" />
+                  </button>
+                </div>
               </div>
 
               {/* 进度条 */}
@@ -190,11 +218,76 @@ export function Dashboard() {
 
               {/* 统计信息 */}
               <div className="flex items-center justify-between text-sm text-gray-500 dark:text-gray-400">
-                <span>{(novel.total_words || 0).toLocaleString()} 字</span>
-                <ChevronRight className="h-5 w-5 text-gray-400 group-hover:text-primary-600 transition-colors" />
+                <Link
+                  to={`/novel/${novel.id}`}
+                  className="hover:text-primary-600 transition-colors flex items-center gap-1"
+                >
+                  {(novel.total_words || 0).toLocaleString()} 字
+                  <ChevronRight className="h-5 w-5" />
+                </Link>
               </div>
-            </Link>
+            </div>
           ))}
+        </div>
+      )}
+      {/* 删除确认弹窗 */}
+      {deleteTarget && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-xl shadow-2xl w-full max-w-md mx-4 p-6">
+            <div className="flex items-center gap-3 mb-4">
+              <div className="p-2 bg-red-100 dark:bg-red-900/30 rounded-full">
+                <AlertTriangle className="h-6 w-6 text-red-600" />
+              </div>
+              <div>
+                <h3 className="text-lg font-bold text-gray-900 dark:text-white">彻底删除小说</h3>
+                <p className="text-sm text-gray-500">此操作不可恢复</p>
+              </div>
+            </div>
+            <p className="text-gray-600 dark:text-gray-300 mb-4">
+              即将彻底删除小说「<strong>{deleteTarget.title}</strong>」，包括：
+            </p>
+            <ul className="text-sm text-gray-500 dark:text-gray-400 mb-4 space-y-1 list-disc list-inside">
+              <li>数据库中的小说、章节、角色、大纲记录</li>
+              <li>本地文件目录 output/novel_{deleteTarget.id}/</li>
+              <li>Qdrant 向量库中的相关记忆数据</li>
+            </ul>
+            <p className="text-sm text-gray-500 dark:text-gray-400 mb-3">
+              请在下方输入小说名称确认：
+            </p>
+            <input
+              type="text"
+              value={deleteConfirmText}
+              onChange={(e) => setDeleteConfirmText(e.target.value)}
+              placeholder={deleteTarget.title}
+              className="w-full px-3 py-2 mb-4 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-900 text-gray-900 dark:text-white focus:ring-2 focus:ring-red-500"
+            />
+            <div className="flex gap-3 justify-end">
+              <button
+                onClick={() => { setDeleteTarget(null); setDeleteConfirmText('') }}
+                className="px-4 py-2 text-gray-600 dark:text-gray-400 hover:text-gray-800 dark:hover:text-gray-200"
+              >
+                取消
+              </button>
+              <button
+                onClick={() => {
+                  if (deleteConfirmText === deleteTarget.title) {
+                    deleteMutation.mutate(deleteTarget.id)
+                  }
+                }}
+                disabled={deleteConfirmText !== deleteTarget.title || deleteMutation.isPending}
+                className="px-4 py-2 bg-red-600 hover:bg-red-700 disabled:bg-gray-300 disabled:cursor-not-allowed text-white rounded-lg font-medium transition-colors"
+              >
+                {deleteMutation.isPending ? (
+                  <span className="flex items-center gap-2">
+                    <Loader2 className="h-4 w-4 animate-spin" /> 删除中...
+                  </span>
+                ) : '彻底删除'}
+              </button>
+            </div>
+            {deleteMutation.isError && (
+              <p className="mt-3 text-sm text-red-500">删除失败: {String(deleteMutation.error)?.split('\n').pop()}</p>
+            )}
+          </div>
         </div>
       )}
     </div>

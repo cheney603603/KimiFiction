@@ -41,6 +41,9 @@ class NovelState(TypedDict):
     current_chapter: int                        # 当前章节序号
     chapters: List[Dict]                        # 章节列表
     rag_context: List[Dict]                     # RAG检索上下文
+    active_entities: List[str]                  # 当前活跃实体ID列表
+    entity_context: List[str]                   # 实体召回上下文
+    final_context: List[str]                    # 融合后的最终上下文
     checkpoint_data: Optional[Dict]             # 断点数据
     errors: List[str]                           # 错误列表
     status: str                                 # 状态字符串
@@ -76,6 +79,9 @@ def create_initial_state(novel_id: int, workflow_id: str, user_input: str = "") 
         "current_chapter": 1,
         "chapters": [],
         "rag_context": [],
+        "active_entities": [],
+        "entity_context": [],
+        "final_context": [],
         "checkpoint_data": None,
         "errors": [],
         "status": "init"

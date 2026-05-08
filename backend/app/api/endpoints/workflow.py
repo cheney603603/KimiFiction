@@ -62,18 +62,19 @@ async def get_phase_result(novel_id: int, phase: str):
         if not engine.state:
             raise HTTPException(status_code=404, detail="工作流状态不存在")
         
-        # 根据阶段返回对应的数据
-        phase_data_map = {
-            "demand_analysis": engine.state.demand_analysis,
-            "world_building": engine.state.world_setting,
-            "character_design": {"characters": engine.state.characters} if engine.state.characters else None,
-            "plot_design": engine.state.plot_setting,
-            "outline_draft": engine.state.outline,
-            "outline_detail": {"chapter_outlines": engine.state.chapter_outlines} if (engine.state.chapter_outlines or WorkflowPhase.OUTLINE_DETAIL in engine.state.phase_history) else None,
-        }
-        
-        data = phase_data_map.get(phase)
-        
+        artifact = (engine.state.phase_artifacts or {}).get(phase, {})
+        data = artifact.get("data")
+        if data is None:
+            phase_data_map = {
+                "demand_analysis": engine.state.demand_analysis,
+                "world_building": engine.state.world_setting,
+                "character_design": {"characters": engine.state.characters} if engine.state.characters else None,
+                "plot_design": engine.state.plot_setting,
+                "outline_draft": engine.state.outline,
+                "outline_detail": {"chapter_outlines": engine.state.chapter_outlines} if (engine.state.chapter_outlines or WorkflowPhase.OUTLINE_DETAIL in engine.state.phase_history) else None,
+            }
+            data = phase_data_map.get(phase)
+
         if data is None:
             return {
                 "success": True,
@@ -86,6 +87,9 @@ async def get_phase_result(novel_id: int, phase: str):
             "success": True,
             "phase": phase,
             "data": data,
+            "assistant_message": artifact.get("assistant_message", ""),
+            "requirement_review": artifact.get("requirement_review", {}),
+            "conversation": (engine.state.phase_conversations or {}).get(phase, []),
             "message": "获取成功"
         }
         
@@ -181,6 +185,149 @@ async def extend_chapter_outlines(novel_id: int, target_chapters: int = 30):
         raise HTTPException(status_code=500, detail=str(e))
 
 
+# ===== 章节细纲 CRUD API =====
+
+@router.get("/chapter-outlines/{novel_id}")
+async def list_chapter_outlines(novel_id: int):
+    """获取所有章节细纲"""
+    try:
+        engine = await get_workflow_engine(novel_id)
+        if not engine.state:
+            raise HTTPException(status_code=404, detail="工作流状态不存在")
+        
+        outlines = engine.state.chapter_outlines or []
+        return {
+            "success": True,
+            "count": len(outlines),
+            "chapter_outlines": outlines,
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取章节细纲失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.get("/chapter-outlines/{novel_id}/{chapter_number}")
+async def get_chapter_outline(novel_id: int, chapter_number: int):
+    """获取单章细纲"""
+    try:
+        engine = await get_workflow_engine(novel_id)
+        if not engine.state:
+            raise HTTPException(status_code=404, detail="工作流状态不存在")
+        
+        for co in (engine.state.chapter_outlines or []):
+            if co.get("chapter_number") == chapter_number:
+                return {"success": True, "chapter_outline": co}
+        
+        raise HTTPException(status_code=404, detail=f"第{chapter_number}章细纲不存在")
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"获取章节细纲失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/chapter-outlines/{novel_id}/{chapter_number}")
+async def update_chapter_outline(novel_id: int, chapter_number: int, data: dict):
+    """更新单章细纲"""
+    try:
+        engine = await get_workflow_engine(novel_id)
+        if not engine.state:
+            raise HTTPException(status_code=404, detail="工作流状态不存在")
+        
+        outlines = engine.state.chapter_outlines or []
+        found = False
+        for i, co in enumerate(outlines):
+            if co.get("chapter_number") == chapter_number:
+                # 合并更新：保留 chapter_number，更新其他字段
+                updated = {**co, **data, "chapter_number": chapter_number}
+                outlines[i] = updated
+                found = True
+                break
+        
+        if not found:
+            # 如果不存在，添加新的
+            new_outline = {**data, "chapter_number": chapter_number}
+            outlines.append(new_outline)
+            # 按 chapter_number 排序
+            outlines.sort(key=lambda x: x.get("chapter_number", 0))
+        
+        engine.state.chapter_outlines = outlines
+        await engine.save_state()
+        
+        return {
+            "success": True,
+            "message": f"第{chapter_number}章细纲已更新",
+            "chapter_outline": next((co for co in outlines if co.get("chapter_number") == chapter_number), None),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"更新章节细纲失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.put("/chapter-outlines/{novel_id}")
+async def batch_update_chapter_outlines(novel_id: int, data: dict):
+    """批量更新章节细纲"""
+    try:
+        engine = await get_workflow_engine(novel_id)
+        if not engine.state:
+            raise HTTPException(status_code=404, detail="工作流状态不存在")
+        
+        new_outlines = data.get("chapter_outlines", [])
+        if not isinstance(new_outlines, list):
+            raise HTTPException(status_code=400, detail="chapter_outlines 必须是数组")
+        
+        # 按 chapter_number 排序
+        new_outlines.sort(key=lambda x: x.get("chapter_number", 0))
+        engine.state.chapter_outlines = new_outlines
+        await engine.save_state()
+        
+        return {
+            "success": True,
+            "message": f"已批量更新 {len(new_outlines)} 章细纲",
+            "count": len(new_outlines),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"批量更新章节细纲失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/chapter-outlines/{novel_id}/{chapter_number}")
+async def delete_chapter_outline(novel_id: int, chapter_number: int):
+    """删除单章细纲"""
+    try:
+        engine = await get_workflow_engine(novel_id)
+        if not engine.state:
+            raise HTTPException(status_code=404, detail="工作流状态不存在")
+        
+        outlines = engine.state.chapter_outlines or []
+        original_count = len(outlines)
+        engine.state.chapter_outlines = [
+            co for co in outlines if co.get("chapter_number") != chapter_number
+        ]
+        
+        if len(engine.state.chapter_outlines) == original_count:
+            raise HTTPException(status_code=404, detail=f"第{chapter_number}章细纲不存在")
+        
+        await engine.save_state()
+        
+        return {
+            "success": True,
+            "message": f"第{chapter_number}章细纲已删除",
+            "remaining": len(engine.state.chapter_outlines),
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error(f"删除章节细纲失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
 @router.get("/phase-prompt/{novel_id}/{phase}")
 async def get_phase_prompt_info(novel_id: int, phase: str):
     """获取指定阶段的提示词构建信息"""
@@ -190,17 +337,18 @@ async def get_phase_prompt_info(novel_id: int, phase: str):
         if not engine.state:
             raise HTTPException(status_code=404, detail="工作流状态不存在")
         
-        # 从阶段结果中提取提示词构建信息
-        phase_data_map = {
-            "demand_analysis": engine.state.demand_analysis,
-            "world_building": engine.state.world_setting,
-            "character_design": {"characters": engine.state.characters} if engine.state.characters else None,
-            "plot_design": engine.state.plot_setting,
-            "outline_draft": engine.state.outline,
-            "outline_detail": {"chapter_outlines": engine.state.chapter_outlines} if (engine.state.chapter_outlines or WorkflowPhase.OUTLINE_DETAIL in engine.state.phase_history) else None,
-        }
-        
-        data = phase_data_map.get(phase)
+        artifact = (engine.state.phase_artifacts or {}).get(phase, {})
+        data = artifact.get("data")
+        if data is None:
+            phase_data_map = {
+                "demand_analysis": engine.state.demand_analysis,
+                "world_building": engine.state.world_setting,
+                "character_design": {"characters": engine.state.characters} if engine.state.characters else None,
+                "plot_design": engine.state.plot_setting,
+                "outline_draft": engine.state.outline,
+                "outline_detail": {"chapter_outlines": engine.state.chapter_outlines} if (engine.state.chapter_outlines or WorkflowPhase.OUTLINE_DETAIL in engine.state.phase_history) else None,
+            }
+            data = phase_data_map.get(phase)
         
         if not data:
             return {
@@ -211,7 +359,7 @@ async def get_phase_prompt_info(novel_id: int, phase: str):
             }
         
         # 提取提示词构建信息
-        prompt_info = data.get("_prompt_build_info", {})
+        prompt_info = data.get("_prompt_build_info", {}) if isinstance(data, dict) else {}
         
         return {
             "success": True,
@@ -270,6 +418,10 @@ async def toggle_phase_completion(novel_id: int, phase: str, request: WorkflowPh
                 engine.state.outline = None
             elif phase == "outline_detail":
                 engine.state.chapter_outlines = []
+            if hasattr(engine.state, "phase_artifacts"):
+                engine.state.phase_artifacts.pop(phase, None)
+            if hasattr(engine.state, "phase_conversations"):
+                engine.state.phase_conversations.pop(phase, None)
             
             # 从phase_history中移除
             if target_phase in engine.state.phase_history:
@@ -303,6 +455,13 @@ async def toggle_phase_completion(novel_id: int, phase: str, request: WorkflowPh
                 engine.state.outline = input_data
             elif phase == "outline_detail":
                 engine.state.chapter_outlines = input_data.get("chapter_outlines", [])
+            if hasattr(engine.state, "phase_artifacts"):
+                engine.state.phase_artifacts[phase] = {
+                    "data": input_data,
+                    "assistant_message": input_data.get("_assistant_message", ""),
+                    "requirement_review": input_data.get("_requirement_review", {}),
+                    "updated_at": datetime.now().isoformat(),
+                }
 
             # 添加到phase_history
             if target_phase not in engine.state.phase_history:

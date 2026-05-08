@@ -1,9 +1,19 @@
-import { useState, useEffect, useRef } from 'react'
-import { useParams, Link } from 'react-router-dom'
-import { useQuery, useMutation } from '@tanstack/react-query'
-import { Send, Bot, User, Loader2, Sparkles, CheckCircle, ArrowLeft } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { Link, useParams } from 'react-router-dom'
+import { useMutation, useQuery } from '@tanstack/react-query'
+import { ArrowLeft, Bot, Loader2, Send, Sparkles, User } from 'lucide-react'
+
 import { workflowApi } from '../services/api'
-import type { WorkflowState, AgentMessage } from '../types'
+import type { AgentMessage, WorkflowState } from '../types'
+
+/**
+ * WorkflowChat - 轻量级工作流对话页面
+ *
+ * 设计原则：
+ * 1. 只保留核心聊天能力，不与 WorkflowPage 功能重叠
+ * 2. 修复自引用查询问题（refetchInterval 不依赖 query 内部状态）
+ * 3. 状态管理极简，只读工作流状态，不写复杂逻辑
+ */
 
 export function WorkflowChat() {
   const { novelId } = useParams<{ novelId: string }>()
@@ -11,302 +21,229 @@ export function WorkflowChat() {
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const [input, setInput] = useState('')
 
-  const { data: workflowState, refetch, error: workflowError, isError } = useQuery({
+  // ── 工作流状态查询（修复自引用问题） ──
+  // 问题：原代码 refetchInterval 使用了 query.state.error，这是自引用
+  // 修复：使用独立的 isError 状态控制轮询
+  const {
+    data: workflowState,
+    refetch,
+    isError,
+    isLoading,
+  } = useQuery<WorkflowState>({
     queryKey: ['workflow', id],
     queryFn: () => workflowApi.getState(id),
     enabled: !!id,
-    refetchInterval: workflowError ? false : 5000, // 404时不刷新
-    retry: false,
+    // 修复：refetchInterval 使用函数参数中的 state，而不是闭包变量
+    refetchInterval: (query) => {
+      // 有错误时停止轮询，避免无限报错
+      if (query.state.error) return false
+      return 5000
+    },
+    retry: 1, // 只重试1次，避免404时疯狂重试
+    staleTime: 3000, // 3秒内不重复请求
   })
 
-  // 检查是否是404错误（工作流未初始化）
-  const isNotFound = isError && (workflowError as any)?.response?.status === 404
+  // 404 表示工作流未初始化
+  const isNotFound = isError
 
+  // ── 消息提交 ──
   const submitMutation = useMutation({
     mutationFn: (message: string) => workflowApi.submitInput(id, message),
     onSuccess: () => {
-      refetch()
       setInput('')
+      refetch()
     },
   })
 
-  const generateCharactersMutation = useMutation({
-    mutationFn: () => workflowApi.generateCharacters(id),
-    onSuccess: () => refetch(),
-  })
-
-  const generateOutlineMutation = useMutation({
-    mutationFn: () => workflowApi.generateOutline(id),
-    onSuccess: () => refetch(),
-  })
-
-  const startWritingMutation = useMutation({
-    mutationFn: () => workflowApi.startWriting(id),
-    onSuccess: () => refetch(),
-  })
-
+  // ── 初始化工作流 ──
   const startWorkflowMutation = useMutation({
     mutationFn: (data: { title: string; initial_idea?: string }) =>
       workflowApi.start({ title: data.title, initial_idea: data.initial_idea }),
     onSuccess: () => refetch(),
   })
 
-  // 自动滚动到底部
+  // ── 自动滚动 ──
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
   }, [workflowState?.messages])
 
+  const messages: AgentMessage[] = workflowState?.messages || []
+
   const handleSubmit = () => {
-    if (input.trim() && !submitMutation.isPending) {
-      submitMutation.mutate(input.trim())
-    }
+    if (!input.trim() || submitMutation.isPending) return
+    submitMutation.mutate(input.trim())
   }
 
-  const state = workflowState as WorkflowState
-  const messages = state?.messages || []
-
-  // 获取当前阶段提示
+  // ── 阶段提示文字 ──
   const getStageHint = () => {
     const stageHints: Record<string, string> = {
-      awaiting_genre: '正在分析小说类型...',
-      discussing_plot: '正在讨论剧情走向...',
+      awaiting_genre: '等待选择小说类型...',
+      discussing_plot: '正在讨论剧情...',
       designing_chars: '正在设计角色...',
       generating_outline: '正在生成大纲...',
       writing_chapter: '正在撰写章节...',
-      reviewing: '等待审核...',
+      reviewing: '正在审阅...',
       paused: '已暂停',
+      completed: '已完成',
     }
-    return stageHints[state?.current_state] || '创作中...'
+    return stageHints[workflowState?.current_state || ''] || '创作中...'
   }
 
-  // 如果工作流未初始化，显示初始化界面
-  if (isNotFound) {
+  // ── 未初始化状态 ──
+  if (isNotFound && !workflowState) {
     return (
-      <div className="max-w-2xl mx-auto">
-        {/* 返回按钮 */}
+      <div className="max-w-2xl mx-auto p-6">
         <Link
           to={`/novel/${id}`}
-          className="inline-flex items-center gap-2 text-gray-600 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 transition-colors mb-6"
+          className="inline-flex items-center gap-2 text-gray-400 hover:text-indigo-400 transition-colors mb-6"
         >
-          <ArrowLeft className="h-5 w-5" />
+          <ArrowLeft className="h-4 w-4" />
           返回小说详情
         </Link>
 
-        <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-8 text-center">
-          <Bot className="h-16 w-16 text-primary-600 mx-auto mb-6" />
-          <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-4">
-            开始创作您的小说
-          </h1>
-          <p className="text-gray-500 dark:text-gray-400 mb-8 max-w-md mx-auto">
-            工作流尚未初始化。点击下方按钮开始与 AI 助手一起创作小说。
+        <div className="bg-gray-900 rounded-xl border border-gray-800 p-8 text-center">
+          <Sparkles className="h-12 w-12 text-indigo-500 mx-auto mb-4" />
+          <h1 className="text-xl font-bold text-white mb-3">初始化工作流</h1>
+          <p className="text-gray-400 mb-6">
+            当前小说还没有创建工作流对话状态，初始化后即可开始 AI 辅助创作。
           </p>
           <button
-            onClick={() => startWorkflowMutation.mutate({ title: `小说${id}`, initial_idea: '' })}
+            onClick={() =>
+              startWorkflowMutation.mutate({
+                title: `小说${id}`,
+                initial_idea: '',
+              })
+            }
             disabled={startWorkflowMutation.isPending}
-            className="px-6 py-3 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 flex items-center gap-2 mx-auto"
+            className="inline-flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
           >
             {startWorkflowMutation.isPending ? (
-              <Loader2 className="h-5 w-5 animate-spin" />
+              <Loader2 className="h-4 w-4 animate-spin" />
             ) : (
-              <Sparkles className="h-5 w-5" />
+              <Sparkles className="h-4 w-4" />
             )}
-            开始创作
+            初始化
           </button>
         </div>
       </div>
     )
   }
 
+  // ── 主界面 ──
   return (
-    <div className="h-[calc(100vh-8rem)] flex flex-col">
-      {/* 返回按钮 */}
+    <div className="max-w-4xl mx-auto p-6">
+      {/* 头部 */}
       <Link
         to={`/novel/${id}`}
-        className="inline-flex items-center gap-2 text-gray-600 dark:text-gray-400 hover:text-primary-600 dark:hover:text-primary-400 transition-colors mb-4"
+        className="inline-flex items-center gap-2 text-gray-400 hover:text-indigo-400 transition-colors mb-6"
       >
-        <ArrowLeft className="h-5 w-5" />
+        <ArrowLeft className="h-4 w-4" />
         返回小说详情
       </Link>
-      {/* 顶部状态栏 */}
-      <div className="bg-white dark:bg-gray-800 rounded-t-xl p-4 border-b border-gray-200 dark:border-gray-700">
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-lg font-semibold text-gray-900 dark:text-white">
-              AI创作助手
-            </h1>
-            <p className="text-sm text-gray-500 dark:text-gray-400">
-              {getStageHint()}
-            </p>
-          </div>
-          <div className="flex items-center gap-2">
-            {/* 进度指示器 */}
-            <div className="flex items-center gap-1">
-              {['genre_confirmed', 'plot_discussed', 'characters_designed', 'outline_generated', 'writing_started'].map((step, i) => (
-                <div
-                  key={step}
-                  className={`w-2 h-2 rounded-full ${
-                    state?.progress?.[step as keyof typeof state.progress]
-                      ? 'bg-green-500'
-                      : 'bg-gray-300 dark:bg-gray-600'
-                  }`}
-                />
-              ))}
-            </div>
-          </div>
-        </div>
-      </div>
 
-      {/* 消息区域 */}
-      <div className="flex-1 overflow-y-auto bg-gray-50 dark:bg-gray-900 p-4 space-y-4">
-        {messages.length === 0 ? (
-          <div className="text-center py-12">
-            <Bot className="h-12 w-12 text-gray-400 mx-auto mb-4" />
-            <h3 className="text-lg font-medium text-gray-900 dark:text-white mb-2">
-              开始创作您的小说
-            </h3>
-            <p className="text-gray-500 dark:text-gray-400 max-w-md mx-auto">
-              告诉我您想写什么类型的小说，我会帮您分析、设计角色、生成大纲，并自动撰写章节。
+      <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
+        {/* 标题栏 */}
+        <div className="px-6 py-4 border-b border-gray-800 flex items-center justify-between">
+          <div>
+            <h1 className="text-xl font-bold text-white">工作流对话</h1>
+            <p className="text-sm text-gray-500">
+              {isLoading ? '加载中...' : getStageHint()}
             </p>
           </div>
-        ) : (
-          messages.map((msg: AgentMessage, index: number) => (
-            <div
-              key={index}
-              className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-            >
-              {msg.role !== 'user' && (
-                <div className="w-8 h-8 rounded-full bg-primary-100 dark:bg-primary-900 flex items-center justify-center shrink-0">
-                  {msg.role === 'agent' ? (
-                    <Bot className="h-5 w-5 text-primary-600" />
-                  ) : (
-                    <Sparkles className="h-5 w-5 text-primary-600" />
-                  )}
-                </div>
-              )}
-              
+          {workflowState?.can_proceed && (
+            <span className="inline-flex items-center gap-1 px-3 py-1 text-xs bg-green-900/30 text-green-400 rounded-full">
+              可继续
+            </span>
+          )}
+        </div>
+
+        {/* 消息区 */}
+        <div className="p-4 h-[60vh] overflow-y-auto space-y-4 bg-gray-950">
+          {messages.length === 0 ? (
+            <div className="text-center text-gray-500 py-12">
+              <Bot className="h-10 w-10 mx-auto mb-3 opacity-50" />
+              <p>还没有消息，开始你的创作对话吧。</p>
+              <p className="text-xs text-gray-600 mt-2">
+                提示：如需完整阶段控制，请使用
+                <Link
+                  to={`/novel/${id}/workflow`}
+                  className="text-indigo-400 hover:text-indigo-300 ml-1"
+                >
+                  新版工作流页面
+                </Link>
+              </p>
+            </div>
+          ) : (
+            messages.map((message, index) => (
               <div
-                className={`max-w-[70%] rounded-2xl px-4 py-2 ${
-                  msg.role === 'user'
-                    ? 'bg-primary-600 text-white'
-                    : msg.message_type === 'suggestion'
-                    ? 'bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800'
-                    : 'bg-white dark:bg-gray-800 border border-gray-200 dark:border-gray-700'
+                key={`${message.timestamp}-${index}`}
+                className={`flex ${
+                  message.role === 'user' ? 'justify-end' : 'justify-start'
                 }`}
               >
-                <p className={`text-sm ${msg.role === 'user' ? 'text-white' : 'text-gray-800 dark:text-gray-200'}`}>
-                  {msg.content}
-                </p>
-                {msg.message_type === 'suggestion' && (
-                  <div className="mt-2 flex items-center gap-1 text-xs text-green-600 dark:text-green-400">
-                    <CheckCircle className="h-3 w-3" />
-                    建议
+                <div
+                  className={`max-w-[80%] rounded-2xl px-4 py-3 ${
+                    message.role === 'user'
+                      ? 'bg-indigo-600 text-white'
+                      : 'bg-gray-800 border border-gray-700'
+                  }`}
+                >
+                  <div className="flex items-center gap-2 mb-1">
+                    {message.role === 'user' ? (
+                      <User className="h-4 w-4" />
+                    ) : (
+                      <Bot className="h-4 w-4 text-indigo-400" />
+                    )}
+                    <span className="text-xs opacity-75">
+                      {message.role === 'user' ? '你' : 'Agent'}
+                    </span>
                   </div>
-                )}
-              </div>
-
-              {msg.role === 'user' && (
-                <div className="w-8 h-8 rounded-full bg-gray-200 dark:bg-gray-700 flex items-center justify-center shrink-0">
-                  <User className="h-5 w-5 text-gray-600 dark:text-gray-400" />
+                  <p className="text-sm whitespace-pre-wrap">{message.content}</p>
                 </div>
+              </div>
+            ))
+          )}
+          <div ref={messagesEndRef} />
+        </div>
+
+        {/* 输入区 */}
+        <div className="px-6 py-4 border-t border-gray-800 bg-gray-900">
+          <div className="flex gap-2">
+            <input
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && !e.shiftKey) {
+                  e.preventDefault()
+                  handleSubmit()
+                }
+              }}
+              placeholder="输入你的想法..."
+              className="flex-1 px-4 py-2.5 border border-gray-700 rounded-lg bg-gray-800 text-gray-200 focus:outline-none focus:border-indigo-500"
+            />
+            <button
+              onClick={handleSubmit}
+              disabled={!input.trim() || submitMutation.isPending}
+              className="px-4 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50"
+            >
+              {submitMutation.isPending ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Send className="h-4 w-4" />
               )}
-            </div>
-          ))
-        )}
-        <div ref={messagesEndRef} />
-      </div>
-
-      {/* 快捷操作按钮 */}
-      {state?.suggestions && state.suggestions.length > 0 && (
-        <div className="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 p-2">
-          <div className="flex gap-2 overflow-x-auto">
-            {state.suggestions.map((suggestion, i) => (
-              <button
-                key={i}
-                onClick={() => submitMutation.mutate(suggestion)}
-                className="px-3 py-1.5 text-sm bg-gray-100 dark:bg-gray-700 text-gray-700 dark:text-gray-300 rounded-full whitespace-nowrap hover:bg-gray-200 dark:hover:bg-gray-600"
-              >
-                {suggestion}
-              </button>
-            ))}
+            </button>
           </div>
-        </div>
-      )}
 
-      {/* 特殊操作按钮 */}
-      {state?.current_state === 'designing_chars' && (
-        <div className="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 p-3">
-          <button
-            onClick={() => generateCharactersMutation.mutate()}
-            disabled={generateCharactersMutation.isPending}
-            className="w-full py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 disabled:opacity-50 flex items-center justify-center gap-2"
-          >
-            {generateCharactersMutation.isPending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Sparkles className="h-4 w-4" />
-            )}
-            生成角色设计
-          </button>
-        </div>
-      )}
-
-      {state?.current_state === 'generating_outline' && (
-        <div className="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 p-3">
-          <button
-            onClick={() => generateOutlineMutation.mutate()}
-            disabled={generateOutlineMutation.isPending}
-            className="w-full py-2 bg-orange-600 text-white rounded-lg hover:bg-orange-700 disabled:opacity-50 flex items-center justify-center gap-2"
-          >
-            {generateOutlineMutation.isPending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Sparkles className="h-4 w-4" />
-            )}
-            生成剧情大纲
-          </button>
-        </div>
-      )}
-
-      {state?.current_state === 'writing_chapter' && !state?.progress?.writing_started && (
-        <div className="bg-white dark:bg-gray-800 border-t border-gray-200 dark:border-gray-700 p-3">
-          <button
-            onClick={() => startWritingMutation.mutate()}
-            disabled={startWritingMutation.isPending}
-            className="w-full py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 flex items-center justify-center gap-2"
-          >
-            {startWritingMutation.isPending ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Sparkles className="h-4 w-4" />
-            )}
-            开始自动撰写
-          </button>
-        </div>
-      )}
-
-      {/* 输入区域 */}
-      <div className="bg-white dark:bg-gray-800 rounded-b-xl p-4 border-t border-gray-200 dark:border-gray-700">
-        <div className="flex gap-2">
-          <input
-            type="text"
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleSubmit()}
-            placeholder={state?.waiting_for_user ? "输入您的想法..." : "等待AI响应..."}
-            disabled={!state?.waiting_for_user || submitMutation.isPending}
-            className="flex-1 px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent disabled:opacity-50"
-          />
-          <button
-            onClick={handleSubmit}
-            disabled={!input.trim() || !state?.waiting_for_user || submitMutation.isPending}
-            className="px-4 py-2 bg-primary-600 text-white rounded-lg hover:bg-primary-700 disabled:opacity-50 flex items-center gap-2"
-          >
-            {submitMutation.isPending ? (
-              <Loader2 className="h-5 w-5 animate-spin" />
-            ) : (
-              <Send className="h-5 w-5" />
-            )}
-          </button>
+          {/* 底部提示 */}
+          <div className="mt-3 flex items-center justify-between text-xs text-gray-500">
+            <span>按 Enter 发送，Shift+Enter 换行</span>
+            <Link
+              to={`/novel/${id}/workflow`}
+              className="text-indigo-400 hover:text-indigo-300"
+            >
+              切换到完整工作流 →
+            </Link>
+          </div>
         </div>
       </div>
     </div>

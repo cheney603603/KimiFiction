@@ -95,6 +95,12 @@ class Novel(Base):
         cascade="all, delete-orphan",
         lazy="selectin"
     )
+    entities: Mapped[List["Entity"]] = relationship(
+        "Entity",
+        back_populates="novel",
+        cascade="all, delete-orphan",
+        lazy="selectin"
+    )
     feedbacks: Mapped[List["ChapterFeedback"]] = relationship(
         "ChapterFeedback",
         back_populates="novel",

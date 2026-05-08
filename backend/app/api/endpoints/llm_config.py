@@ -11,8 +11,11 @@ from typing import Optional, List
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from loguru import logger
+import httpx
+import time
 
 from app.core.llm_config_manager import LLMConfigManager
+from app.core.config import settings
 
 router = APIRouter()
 
@@ -115,6 +118,180 @@ async def get_timeout():
         "timeout": timeout,
         "response_time": LLMConfigManager.get_config().get("response_time")
     }
+
+
+@router.get("/config/current")
+async def get_current_config():
+    """获取当前 LLM 配置（隐藏敏感信息）"""
+    config = LLMConfigManager.get_config()
+    return {
+        "provider": config.get("provider"),
+        "base_url": config.get("base_url"),
+        "model": config.get("model"),
+        "has_api_key": bool(config.get("api_key")),
+        "response_time": config.get("response_time"),
+        "timeout": config.get("timeout"),
+    }
+
+
+class TestConnectionResponse(BaseModel):
+    """测试连接响应"""
+    success: bool
+    message: str
+    response_time_ms: Optional[int] = None
+    response: Optional[str] = None
+    error: Optional[str] = None
+
+
+@router.post("/config/test", response_model=TestConnectionResponse)
+async def test_llm_connection(config: LLMConfigRequest):
+    """
+    测试 LLM API 连接
+    
+    通过后端代理测试，优先使用前端传入的配置，
+    如果前端未传入 apiKey 则使用 .env 中的配置
+    """
+    start_time = time.time()
+    
+    try:
+        provider = config.provider or "deepseek"
+        
+        # 优先使用前端传入的配置
+        api_key = config.apiKey
+        base_url = config.baseUrl
+        model = config.model
+        
+        # 如果前端未传入，则使用后端 .env 配置
+        if not api_key:
+            api_key = settings.DEEPSEEK_API_KEY or settings.OPENAI_API_KEY
+        if not base_url:
+            base_url = settings.DEEPSEEK_BASE_URL if provider == "deepseek" else settings.OPENAI_BASE_URL
+        if not model:
+            model = settings.DEEPSEEK_MODEL if provider == "deepseek" else settings.OPENAI_MODEL
+        
+        if provider in ["openai", "deepseek"]:
+            # OpenAI / DeepSeek 直接 API 测试
+            if not api_key:
+                return TestConnectionResponse(
+                    success=False,
+                    message=f"{provider.upper()} API Key not set",
+                    error="请在 .env 中设置 API Key 或在前端页面手动输入"
+                )
+            
+            test_url = f"{base_url}/chat/completions"
+            logger.info(f"测试 {provider} API: {test_url}")
+            
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    test_url,
+                    headers={
+                        "Content-Type": "application/json",
+                        "Authorization": f"Bearer {api_key}",
+                    },
+                    json={
+                        "model": model,
+                        "messages": [
+                            {"role": "system", "content": "You are a test assistant."},
+                            {"role": "user", "content": "Reply with 'OK' only."},
+                        ],
+                        "max_tokens": 50,
+                    }
+                )
+            
+            response_time_ms = int((time.time() - start_time) * 1000)
+            
+            if not response.is_success:
+                error_data = response.json() if response.headers.get("content-type", "").startswith("application/json") else {}
+                error_msg = error_data.get("error", {}).get("message", f"HTTP {response.status_code}")
+                return TestConnectionResponse(
+                    success=False,
+                    message=f"{provider.upper()} API 连接失败",
+                    response_time_ms=response_time_ms,
+                    error=error_msg
+                )
+            
+            data = response.json()
+            reply = data.get("choices", [{}])[0].get("message", {}).get("content", "No reply")
+            
+            return TestConnectionResponse(
+                success=True,
+                message=f"{provider.upper()} API 连接成功",
+                response_time_ms=response_time_ms,
+                response=reply
+            )
+        
+        elif provider in ["kimi", "yuanbao"]:
+            # Chat2Api 服务测试
+            chat2api_url = base_url or settings.CHAT2API_BASE_URL
+            test_url = f"{chat2api_url}/api/{provider}/chat"
+            
+            logger.info(f"测试 Chat2Api: {test_url}")
+            
+            async with httpx.AsyncClient(timeout=30.0) as client:
+                response = await client.post(
+                    test_url,
+                    json={
+                        "message": "你好，这是一个测试消息，请简短回复。",
+                        "timeout": 30,
+                    }
+                )
+            
+            response_time_ms = int((time.time() - start_time) * 1000)
+            
+            if not response.is_success:
+                if response.status_code == 401:
+                    return TestConnectionResponse(
+                        success=False,
+                        message=f"{provider} 未登录",
+                        error="请先登录 chat2api 服务"
+                    )
+                return TestConnectionResponse(
+                    success=False,
+                    message=f"{provider} 连接失败",
+                    response_time_ms=response_time_ms,
+                    error=f"HTTP {response.status_code}"
+                )
+            
+            data = response.json()
+            if not data.get("success"):
+                return TestConnectionResponse(
+                    success=False,
+                    message=f"{provider} 请求失败",
+                    response_time_ms=response_time_ms,
+                    error=data.get("message", "Unknown error")
+                )
+            
+            return TestConnectionResponse(
+                success=True,
+                message=f"{provider} 连接成功",
+                response_time_ms=response_time_ms,
+                response=data.get("data", "无回复内容")
+            )
+        
+        else:
+            return TestConnectionResponse(
+                success=False,
+                message=f"不支持的提供商: {provider}",
+                error="请选择 openai, deepseek, kimi 或 yuanbao"
+            )
+            
+    except httpx.TimeoutException:
+        response_time_ms = int((time.time() - start_time) * 1000)
+        return TestConnectionResponse(
+            success=False,
+            message="连接超时",
+            response_time_ms=response_time_ms,
+            error="请求超时，请检查网络或 API 地址"
+        )
+    except Exception as e:
+        logger.error(f"测试连接失败: {e}")
+        response_time_ms = int((time.time() - start_time) * 1000)
+        return TestConnectionResponse(
+            success=False,
+            message="测试失败",
+            response_time_ms=response_time_ms,
+            error=str(e)
+        )
 
 
 @router.get("/local-models", response_model=List[LocalModelInfo])

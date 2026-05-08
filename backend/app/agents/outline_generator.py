@@ -1,11 +1,15 @@
 """
 大纲生成智能体
 生成三级大纲结构
+（已集成状态追踪）
 """
 import json
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from app.agents.base import BaseAgent
 from app.core.json_utils import extract_json_from_response
+from app.services.llm_service_tracked import TrackedLLMService
+from app.services.llm_service import LLMProvider
+from app.core.llm_call_tracker import set_novel_context
 
 
 class OutlineGeneratorAgent(BaseAgent):
@@ -36,8 +40,17 @@ class OutlineGeneratorAgent(BaseAgent):
 
 输出必须是合法的JSON格式。"""
     
-    def __init__(self):
+    def __init__(self, novel_id: Optional[int] = None):
         super().__init__("OutlineGenerator", self.SYSTEM_PROMPT)
+        self.novel_id = novel_id
+        if novel_id:
+            self._llm = TrackedLLMService(
+                provider=LLMProvider.DEEPSEEK,
+                novel_id=novel_id,
+                agent_name="outline_generator",
+                auto_track=True
+            )
+            set_novel_context(novel_id)
     
     async def process(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -49,6 +62,19 @@ class OutlineGeneratorAgent(BaseAgent):
         Returns:
             完整大纲结构
         """
+        novel_id = context.get("novel_id") or self.novel_id
+        
+        # 设置追踪上下文
+        if novel_id:
+            set_novel_context(novel_id)
+            if not hasattr(self, '_llm') or not self._llm:
+                self._llm = TrackedLLMService(
+                    provider=LLMProvider.DEEPSEEK,
+                    novel_id=novel_id,
+                    agent_name="outline_generator",
+                    auto_track=True
+                )
+        
         genre = context.get("genre", "玄幻")
         characters = context.get("characters", [])
         plot_summary = context.get("plot_summary", "")

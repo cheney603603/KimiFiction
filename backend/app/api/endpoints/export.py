@@ -191,20 +191,29 @@ async def export_epub(
 
 
 @router.get("/reference/{filename}")
-async def get_reference_file(
-    filename: str,
-    current_user = Depends(get_current_user)
-):
-    """读取 reference 目录下的参考小说文件"""
+async def get_reference_file(filename: str):
+    """读取 reference 目录下的参考小说文件（公开端点，无需认证）"""
     from pathlib import Path
-    from fastapi.responses import FileResponse
 
-    backend_dir = Path(__file__).resolve().parent.parent.parent
-    project_dir = backend_dir.parent
-    ref_file = project_dir / "reference" / filename
+    # 找到项目根目录 (KimiFiction/)
+    # __file__ = backend/app/api/endpoints/export.py
+    # reference 在 KimiFiction/reference/ 即 backend.parent/reference/
+    project_root = Path(__file__).resolve().parent.parent.parent.parent
+    ref_dir = project_root.parent / "reference"
+    ref_file = ref_dir / filename
+
+    # 安全检查：防止路径穿越
+    ref_file_resolved = ref_file.resolve()
+    ref_dir_resolved = ref_dir.resolve()
+    if not str(ref_file_resolved).startswith(str(ref_dir_resolved)):
+        raise HTTPException(status_code=403, detail="非法文件路径")
 
     if not ref_file.exists():
         raise HTTPException(status_code=404, detail=f"文件不存在: {filename}")
+
+    # 检查文件类型
+    if not filename.endswith('.txt'):
+        raise HTTPException(status_code=400, detail="只支持 .txt 文件")
 
     return FileResponse(
         ref_file,

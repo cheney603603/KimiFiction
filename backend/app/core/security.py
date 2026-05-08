@@ -88,3 +88,14 @@ def get_token_expiry(token: str) -> Optional[datetime]:
         return None
     except JWTError:
         return None
+
+
+# 简化的 get_current_user 函数（用于依赖注入）
+async def get_current_user():
+    """
+    获取当前用户（简化版，返回None表示未登录或开发模式）
+    实际生产环境应从请求头中提取JWT令牌并验证
+    """
+    # 开发模式：返回None，允许匿名访问
+    # 生产环境应实现完整的JWT验证逻辑
+    return None

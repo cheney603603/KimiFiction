@@ -1,0 +1,14 @@
+{
+  "total_samples": 24,
+  "rag_passages_indexed": 0,
+  "rag_keywords": 0,
+  "scene_distribution": {
+    "废土列车_发现": 4,
+    "末日_生存": 4,
+    "战斗_对峙": 4,
+    "逃亡_追击": 4,
+    "资源_冲突": 4,
+    "团队_分歧": 4
+  },
+  "avg_output_length": 462.4
+}

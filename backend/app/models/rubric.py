@@ -262,3 +262,58 @@ class ComparisonReport(Base):
     
     # 关系
     novel = relationship("Novel", back_populates="comparison_reports")
+
+
+class SampledEvaluationHistory(Base):
+    """采样评测历史记录 - 存储小说质量采样评测结果"""
+    __tablename__ = "sampled_evaluation_history"
+    
+    id = Column(Integer, primary_key=True, index=True)
+    
+    # 评测来源信息
+    source_type = Column(String(20), nullable=False, comment="来源类型: file(参考小说)/text(粘贴文本)")
+    source_name = Column(String(255), nullable=True, comment="来源名称(文件名或文本摘要)")
+    
+    # 评测参数
+    genre = Column(String(50), nullable=False, comment="小说题材")
+    num_blocks = Column(Integer, nullable=False, comment="采样块数")
+    max_bytes_per_block = Column(Integer, nullable=False, comment="每块最大字节数")
+    total_blocks_in_text = Column(Integer, nullable=False, comment="文本总块数")
+    sampled_blocks = Column(Integer, nullable=False, comment="实际采样块数")
+    
+    # 评测结果
+    total_score = Column(Float, nullable=False, comment="总分(0-10)")
+    rank = Column(String(10), nullable=False, comment="等级(S/A/B/C/D/F)")
+    api_calls = Column(Integer, nullable=False, comment="API调用次数")
+    
+    # 详细数据(存储完整结果JSON)
+    result_data = Column(JSON, nullable=False, comment="完整评测结果JSON")
+    
+    # 文本预览(前500字符)
+    text_preview = Column(Text, nullable=True, comment="评测文本预览")
+    
+    # 元数据
+    created_at = Column(DateTime, default=datetime.now, index=True)
+    
+    def to_summary_dict(self) -> Dict[str, Any]:
+        """转换为摘要字典(用于列表展示)"""
+        return {
+            "id": self.id,
+            "source_type": self.source_type,
+            "source_name": self.source_name,
+            "genre": self.genre,
+            "total_score": self.total_score,
+            "rank": self.rank,
+            "num_blocks": self.num_blocks,
+            "sampled_blocks": self.sampled_blocks,
+            "api_calls": self.api_calls,
+            "created_at": self.created_at.isoformat() if self.created_at else None,
+        }
+    
+    def to_detail_dict(self) -> Dict[str, Any]:
+        """转换为详情字典(包含完整结果)"""
+        return {
+            **self.to_summary_dict(),
+            "result_data": self.result_data,
+            "text_preview": self.text_preview,
+        }

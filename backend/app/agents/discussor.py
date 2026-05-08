@@ -1,134 +1,90 @@
 """
-剧情讨论智能体
-与用户进行多轮对话，确定主线剧情
+讨论智能体
+多Agent讨论协调
+（已集成状态追踪）
 """
-from typing import Any, Dict, List
+import json
+from typing import Any, Dict, List, Optional
 from app.agents.base import BaseAgent
+from app.core.json_utils import extract_json_from_response
+from app.services.llm_service_tracked import TrackedLLMService
+from app.services.llm_service import LLMProvider
+from app.core.llm_call_tracker import set_novel_context
 
 
-class PlotDiscussorAgent(BaseAgent):
+class DiscussorAgent(BaseAgent):
     """
-    剧情讨论智能体
+    讨论协调智能体
     
-    与用户进行交互式对话，确定：
-    - 主线剧情
-    - 核心冲突
-    - 世界观设定
-    - 关键转折点
-    - 结局走向
+    协调多个Agent进行讨论，达成共识
     """
     
-    SYSTEM_PROMPT = """你是一位资深的小说编辑和剧情策划专家。
-你的任务是通过与用户的对话，帮助确定小说的核心剧情。
+    SYSTEM_PROMPT = """你是一位讨论主持人，擅长协调多方意见达成共识。
 
-在对话中，你需要：
-1. 提出关键问题以了解用户的想法
-2. 根据用户的回答给出建议
-3. 逐步完善剧情框架
-4. 记录重要的设定和决策
+你的任务是：
+1. 汇总各方观点
+2. 识别分歧点
+3. 提出协调方案
+4. 促成最终决策
 
-你应该：
-- 保持专业但友好的语气
-- 在关键决策点给出明确建议
-- 帮助用户发现潜在的剧情问题
-- 鼓励用户发挥创意
-
-当前对话阶段：{stage}"""
+输出必须是合法的JSON格式。"""
     
-    def __init__(self):
-        super().__init__("PlotDiscussor", self.SYSTEM_PROMPT.format(stage="初始"))
-        self.conversation_history: List[Dict[str, str]] = []
+    def __init__(self, novel_id: Optional[int] = None):
+        super().__init__("Discussor", self.SYSTEM_PROMPT)
+        self.novel_id = novel_id
+        if novel_id:
+            self._llm = TrackedLLMService(
+                provider=LLMProvider.DEEPSEEK,
+                novel_id=novel_id,
+                agent_name="discussor",
+                auto_track=True
+            )
+            set_novel_context(novel_id)
     
     async def process(self, context: Dict[str, Any]) -> Dict[str, Any]:
-        """
-        处理剧情讨论
+        """协调讨论"""
+        novel_id = context.get("novel_id") or self.novel_id
         
-        Args:
-            context: 包含 user_input, genre, stage 等
-            
-        Returns:
-            智能体响应和当前状态
-        """
-        user_input = context.get("user_input", "")
-        genre = context.get("genre", "未知类型")
-        stage = context.get("stage", "initial")
-        history = context.get("history", [])
+        if novel_id:
+            set_novel_context(novel_id)
+            if not hasattr(self, '_llm') or not self._llm:
+                self._llm = TrackedLLMService(
+                    provider=LLMProvider.DEEPSEEK,
+                    novel_id=novel_id,
+                    agent_name="discussor",
+                    auto_track=True
+                )
         
-        self.log_action("处理剧情讨论", {"stage": stage, "input": user_input[:50]})
+        topic = context.get("topic", "")
+        opinions = context.get("opinions", [])
         
-        # 构建对话历史
-        history_text = "\n".join([
-            f"{'用户' if msg['role'] == 'user' else 'AI'}: {msg['content']}"
-            for msg in history[-5:]  # 只保留最近5轮
-        ])
-        
-        prompt = f"""小说类型：{genre}
-当前阶段：{stage}
+        prompt = f"""请协调以下讨论：
 
-对话历史：
-{history_text}
+讨论主题：{topic}
 
-用户最新输入：
-{user_input}
+各方观点：
+{json.dumps(opinions, ensure_ascii=False, indent=2)}
 
-请回复用户，继续剧情讨论。如果需要，可以：
-1. 提出后续问题
-2. 总结已确定的剧情点
-3. 给出建议或警告
-4. 推进到下一阶段
-
-请直接回复用户（不要加"AI:"前缀）："""
+请输出JSON格式：
+{{
+  "consensus_reached": true,
+  "summary": "讨论总结",
+  "agreed_points": ["共识点1", "共识点2"],
+  "disputed_points": ["分歧点1"],
+  "final_decision": "最终决策",
+  "action_items": ["行动项1"]
+}}"""
         
         try:
-            react_result = await self.run_react_loop(
-                prompt,
-                context=context,
-                output_format="text",
-            )
-            response = react_result["final_text"] or react_result["raw_response"]
-            
-            # 判断是否可以进入下一阶段
-            can_proceed = self._check_can_proceed(stage, history + [
-                {"role": "user", "content": user_input},
-                {"role": "agent", "content": response}
-            ])
-            
-            self.log_action("剧情讨论完成", {"can_proceed": can_proceed})
+            response = await self._call_llm(prompt, output_format="json")
+            result = extract_json_from_response(response)
             
             return {
                 "success": True,
-                "response": response,
-                "can_proceed": can_proceed,
-                "next_stage": self._get_next_stage(stage) if can_proceed else stage,
-                "_react_trace": react_result["trace"],
+                "discussion_result": result
             }
-            
         except Exception as e:
-            self.log_action("讨论失败", {"error": str(e)})
             return {
                 "success": False,
                 "error": str(e)
             }
-    
-    def _check_can_proceed(self, stage: str, history: List[Dict]) -> bool:
-        """检查是否可以进入下一阶段"""
-        # 简单的启发式判断
-        user_messages = [h for h in history if h.get("role") == "user"]
-        
-        if stage == "initial" and len(user_messages) >= 2:
-            return True
-        if stage == "conflict" and len(user_messages) >= 4:
-            return True
-        if stage == "worldbuilding" and len(user_messages) >= 6:
-            return True
-        
-        return False
-    
-    def _get_next_stage(self, current_stage: str) -> str:
-        """获取下一阶段"""
-        stages = ["initial", "conflict", "worldbuilding", "characters", "complete"]
-        try:
-            idx = stages.index(current_stage)
-            return stages[min(idx + 1, len(stages) - 1)]
-        except ValueError:
-            return "initial"

@@ -118,162 +118,59 @@ export function LLMSettings() {
     setTestResult(null)
     setTestLogs([])
     
-    const startTime = Date.now()
-    
     try {
       addLog(`开始测试 ${config.provider} API...`)
-      addLog(`Base URL: ${config.baseUrl}`)
+      addLog(`Base URL: ${config.baseUrl || '使用默认值'}`)
       
-      if (config.provider === 'openai') {
-        // 测试 OpenAI API
-        if (!config.apiKey) {
-          throw new Error('OpenAI API Key 未设置')
+      // 通过后端代理测试连接
+      addLog('通过后端代理发送测试请求...')
+      
+      const result = await llmConfigApi.testConnection({
+        provider: config.provider,
+        apiKey: config.apiKey || undefined,
+        baseUrl: config.baseUrl || undefined,
+        model: config.model || undefined,
+      }) as any
+      
+      if (result.success) {
+        addLog(`✅ ${result.message}`)
+        if (result.response_time_ms) {
+          addLog(`响应时间: ${result.response_time_ms}ms`)
         }
-        
-        addLog('发送测试请求到 OpenAI...')
-        
-        const response = await fetch(`${config.baseUrl}/chat/completions`, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${config.apiKey}`,
-          },
-          body: JSON.stringify({
-            model: config.model,
-            messages: [
-              { role: 'system', content: '你是一个测试助手，请简短回复。' },
-              { role: 'user', content: '你好，这是一个测试消息，请回复"测试成功"。' }
-            ],
-            max_tokens: 50,
-          }),
-        })
-        
-        const responseTime = Date.now() - startTime
-        
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({}))
-          throw new Error(errorData.error?.message || `HTTP ${response.status}`)
+        if (result.response) {
+          addLog(`AI 回复: ${result.response}`)
         }
-        
-        const data = await response.json()
-        const reply = data.choices?.[0]?.message?.content || '无回复'
-        
-        addLog(`收到响应，耗时 ${responseTime}ms`)
         
         // 保存测试返回时长到配置（转换为秒）
-        const responseTimeSec = Math.round(responseTime / 1000)
-        setConfig(prev => ({ ...prev, responseTime: responseTimeSec }))
+        if (result.response_time_ms) {
+          const responseTimeSec = Math.round(result.response_time_ms / 1000)
+          setConfig(prev => ({ ...prev, responseTime: responseTimeSec }))
+        }
         
         setTestResult({
           success: true,
-          message: '连接成功',
-          responseTime,
-          response: reply,
+          message: result.message,
+          responseTime: result.response_time_ms,
+          response: result.response,
         })
-      } else if (config.provider === 'deepseek') {
-        // DeepSeek Direct API Test
-        addLog(`Sending test request to DeepSeek Direct API...`)
-        
-        if (!config.apiKey) {
-          throw new Error('DeepSeek API Key not set')
-        }
-        
-        const testUrl = `${config.baseUrl}/chat/completions`
-        addLog(`Request URL: ${testUrl}`)
-        
-        const response = await fetch(testUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${config.apiKey}`,
-          },
-          body: JSON.stringify({
-            model: config.model || 'deepseek-chat',
-            messages: [
-              { role: 'system', content: 'You are a test assistant.' },
-              { role: 'user', content: 'Reply with "OK" only.' },
-            ],
-            max_tokens: 50,
-          }),
-        })
-        
-        const responseTime = Date.now() - startTime
-        
-        if (!response.ok) {
-          const errorData = await response.json().catch(() => ({}))
-          throw new Error(errorData.error?.message || `HTTP ${response.status}`)
-        }
-        
-        const data = await response.json()
-        const reply = data.choices?.[0]?.message?.content || 'No reply'
-        
-        addLog(`Got reply, took ${responseTime}ms`)
-        
-        const responseTimeSec = Math.round(responseTime / 1000)
-        setConfig(prev => ({ ...prev, responseTime: responseTimeSec }))
-        
-        setTestResult({
-          success: true,
-          message: 'DeepSeek Connected',
-          responseTime,
-          response: reply,
-        })
-      
       } else {
-        // 测试 Chat2Api 服务
-        addLog(`发送测试请求到 ${config.provider}...`)
-        
-        const testUrl = `${config.baseUrl}/api/${config.provider}/chat`
-        addLog(`请求地址: ${testUrl}`)
-        
-        const response = await fetch(testUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            message: '你好，这是一个测试消息，请简短回复。',
-            timeout: 30,
-          }),
-        })
-        
-        const responseTime = Date.now() - startTime
-        
-        if (!response.ok) {
-          if (response.status === 401) {
-            throw new Error(`${config.provider} 未登录，请先登录 chat2api`)
-          }
-          const text = await response.text()
-          throw new Error(`HTTP ${response.status}: ${text}`)
+        addLog(`❌ ${result.message}`)
+        if (result.error) {
+          addLog(`错误详情: ${result.error}`)
         }
-        
-        const data = await response.json()
-        
-        if (!data.success) {
-          throw new Error(data.message || '请求失败')
-        }
-        
-        addLog(`收到响应，耗时 ${responseTime}ms`)
-        
-        // 保存测试返回时长到配置（转换为秒）
-        const responseTimeSec = Math.round(responseTime / 1000)
-        setConfig(prev => ({ ...prev, responseTime: responseTimeSec }))
         
         setTestResult({
-          success: true,
-          message: '连接成功',
-          responseTime,
-          response: data.data || '无回复内容',
+          success: false,
+          message: result.message,
+          error: result.error,
         })
       }
     } catch (err: any) {
-      const responseTime = Date.now() - startTime
       addLog(`测试失败: ${err.message}`)
       
       setTestResult({
         success: false,
         message: '连接失败',
-        responseTime,
         error: err.message,
       })
     } finally {

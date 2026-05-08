@@ -9,14 +9,14 @@
  * 6. 章节写作添加更多参数（文风、环境描写级别、对话占比、注意事项）
  * 7. 阶段结果保存到数据库
  */
-import { useState, useEffect, useRef, useCallback } from 'react'
+import React, { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query'
 import {
   ArrowLeft, Pause, CheckCircle, Circle, Loader2, ChevronRight,
   Sparkles, FileText, Users, Globe, Layers, Edit3, BookOpen,
-  AlertCircle, RotateCcw, MessageSquare, Send, Target, Terminal,
-  Clock, BookMarked,
+  AlertCircle, MessageSquare, Send, Target, Terminal,
+  Clock, BookMarked, Workflow, ChevronDown,
 } from 'lucide-react'
 import { workflowApi, novelApi, chapterApi, llmConfigApi } from '../services/api'
 
@@ -228,7 +228,26 @@ function PhaseResultViewer({ phaseId, phaseName, novelId, isCompleted }: { phase
               <Loader2 className="h-3 w-3 animate-spin" /> 加载中...
             </div>
           ) : isCompleted && result ? (
-            renderContent()
+            <div className="space-y-3">
+              {renderContent()}
+              {result._requirement_review && (
+                <div className="rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 p-3">
+                  <div className="text-xs font-medium text-amber-700 dark:text-amber-400 mb-2">阶段信息检查</div>
+                  {Array.isArray(result._requirement_review.missing_required) && result._requirement_review.missing_required.length > 0 ? (
+                    <div className="text-xs text-amber-700 dark:text-amber-300">
+                      仍缺少：{result._requirement_review.missing_required.join('、')}
+                    </div>
+                  ) : (
+                    <div className="text-xs text-green-700 dark:text-green-400">当前必填信息已基本齐备</div>
+                  )}
+                  {Array.isArray(result._requirement_review.optimization_directions) && result._requirement_review.optimization_directions.length > 0 && (
+                    <div className="mt-2 text-xs text-gray-700 dark:text-gray-300">
+                      建议优化：{result._requirement_review.optimization_directions.slice(0, 3).join('；')}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
           ) : (
             <div className="text-sm text-gray-500">该阶段尚未完成</div>
           )}
@@ -339,6 +358,7 @@ export function WorkflowPage() {
   const [chapterNotes, setChapterNotes] = useState('')
   const [phaseTimeouts, setPhaseTimeouts] = useState<Record<string, number>>({})
   const [showTimeoutConfig, setShowTimeoutConfig] = useState(false)
+  const [showReActGraph, setShowReActGraph] = useState(true)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const progressPollingRef = useRef<ReturnType<typeof setInterval> | null>(null)
 
@@ -347,7 +367,6 @@ export function WorkflowPage() {
   const { data: chapters } = useQuery({ queryKey: ['chapters', id], queryFn: () => chapterApi.list(id), enabled: !!id })
 
   // 辅助函数：检查阶段是否已完成
-  const isPhaseCompleted = (phaseId: string, completed: string[]) => completed.includes(phaseId)
 
   useEffect(() => {
     const syncConfig = async () => {
@@ -389,8 +408,23 @@ export function WorkflowPage() {
         if (progressPollingRef.current) { clearInterval(progressPollingRef.current); progressPollingRef.current = null }
         setIsTyping(false); setCurrentTaskId(null)
         if (currentStep.status === 'completed') {
+          let assistantContent = ''
+          if (currentPhase?.id && currentPhase.id !== 'chapter_writing') {
+            try {
+              const phaseResult = await workflowApi.getPhaseResult(id, currentPhase.id) as any
+              assistantContent =
+                phaseResult?.assistant_message ||
+                phaseResult?.data?._assistant_message ||
+                ''
+            } catch {}
+          }
           const lastLog = currentStep.logs.slice(-1)[0]?.message || '执行完成'
-          setChatMessages(prev => [...prev, { role: 'assistant', content: `成功: ${currentStep.name}\n\n${lastLog}`, timestamp: new Date(), phase: currentPhase?.id }])
+          setChatMessages(prev => [...prev, {
+            role: 'assistant',
+            content: assistantContent || `成功: ${currentStep.name}\n\n${lastLog}`,
+            timestamp: new Date(),
+            phase: currentPhase?.id,
+          }])
         } else {
           setChatMessages(prev => [...prev, { role: 'system', content: `失败: ${currentStep.name} - ${currentStep.error || '未知错误'}`, timestamp: new Date() }])
         }
@@ -570,6 +604,109 @@ export function WorkflowPage() {
               </button>
             )
           })}
+        </div>
+
+        {/* ReAct 状态图 - 可折叠 */}
+        <div className="border-t border-gray-200 dark:border-gray-700">
+          <button
+            onClick={() => setShowReActGraph(!showReActGraph)}
+            className="w-full px-6 py-2 flex items-center justify-between bg-gray-50 dark:bg-gray-900 hover:bg-gray-100 dark:hover:bg-gray-850 transition-colors"
+          >
+            <div className="flex items-center gap-2 text-sm font-medium text-gray-700 dark:text-gray-300">
+              <Workflow className="h-4 w-4 text-primary-500" />
+              <span>ReAct 状态图</span>
+              <span className="text-xs text-gray-400">
+                {completedPhases.length}/{PHASES.length} 阶段完成
+              </span>
+            </div>
+            <ChevronDown className={`h-4 w-4 text-gray-400 transition-transform ${showReActGraph ? 'rotate-180' : ''}`} />
+          </button>
+          {showReActGraph && (
+            <div className="px-6 py-4 bg-white dark:bg-gray-800">
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                {PHASES.map((phase, idx) => {
+                  const isCompleted = isPhaseCompleted(phase.id, completedPhases)
+                  const isRunning = idx === currentPhaseIndex && isTyping
+                  const isCurrent = idx === currentPhaseIndex
+                  const colors = PHASE_COLORS[phase.color]
+                  return (
+                    <React.Fragment key={phase.id}>
+                      <button
+                        onClick={() => {
+                          if (idx !== currentPhaseIndex) handleSwitchPhase(idx)
+                        }}
+                        className={`
+                          flex flex-col items-center px-3 py-2.5 rounded-xl border-2 transition-all min-w-[100px]
+                          ${isRunning
+                            ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/30 shadow-lg shadow-blue-200 dark:shadow-blue-900/50 scale-105'
+                            : isCompleted
+                              ? 'border-green-500 bg-green-50 dark:bg-green-900/20 hover:bg-green-100 dark:hover:bg-green-900/40'
+                              : isCurrent
+                                ? `${colors.bg} ${colors.text} ring-2 ring-primary-300 dark:ring-primary-700`
+                                : 'border-gray-200 dark:border-gray-600 bg-gray-50 dark:bg-gray-800 hover:bg-gray-100 dark:hover:bg-gray-700'
+                          }
+                        `}
+                      >
+                        <div className={`
+                          h-8 w-8 rounded-full flex items-center justify-center mb-1.5
+                          ${isRunning
+                            ? 'bg-blue-500 text-white animate-pulse'
+                            : isCompleted
+                              ? 'bg-green-500 text-white'
+                              : isCurrent
+                                ? `${colors.bg} ${colors.text}`
+                                : 'bg-gray-200 dark:bg-gray-600 text-gray-400 dark:text-gray-500'
+                          }
+                        `}>
+                          {isRunning ? (
+                            <Loader2 className="h-4 w-4 animate-spin" />
+                          ) : isCompleted ? (
+                            <CheckCircle className="h-4 w-4" />
+                          ) : (
+                            <phase.icon className="h-4 w-4" />
+                          )}
+                        </div>
+                        <span className={`text-xs font-medium ${
+                          isRunning ? 'text-blue-700 dark:text-blue-300' :
+                          isCompleted ? 'text-green-700 dark:text-green-400' :
+                          isCurrent ? 'text-gray-900 dark:text-white' :
+                          'text-gray-400 dark:text-gray-500'
+                        }`}>
+                          {phase.name}
+                        </span>
+                        <span className={`text-[10px] mt-0.5 ${
+                          isRunning ? 'text-blue-500 dark:text-blue-400 animate-pulse' :
+                          isCompleted ? 'text-green-500 dark:text-green-500' :
+                          isCurrent ? 'text-gray-500 dark:text-gray-400' :
+                          'text-gray-300 dark:text-gray-600'
+                        }`}>
+                          {isRunning ? '执行中' : isCompleted ? '已完成' : isCurrent ? '当前' : '待执行'}
+                        </span>
+                      </button>
+                      {idx < PHASES.length - 1 && (
+                        <div className="flex items-center mx-1">
+                          <svg className={`w-5 h-3 ${
+                            isCompleted ? 'text-green-400' : 'text-gray-300 dark:text-gray-600'
+                          }`} fill="none" viewBox="0 0 24 16" stroke="currentColor">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M2 8h16m0 0l-4-4m4 4l-4 4" />
+                          </svg>
+                        </div>
+                      )}
+                    </React.Fragment>
+                  )
+                })}
+              </div>
+              {/* Agent ReAct 步数配置摘要 */}
+              <div className="mt-3 flex items-center justify-center gap-4 text-[10px] text-gray-400 dark:text-gray-500">
+                <span>GenreAnalyzer 2步</span>
+                <span>WorldBuilder 5步</span>
+                <span>CharacterDesigner 4步</span>
+                <span>PlotDesigner 5步</span>
+                <span>OutlineGenerator 5步</span>
+                <span>ChapterWriter 3步</span>
+              </div>
+            </div>
+          )}
         </div>
       </div>
 

@@ -22,7 +22,7 @@ from app.models.rubric import (
 from app.models.novel import Novel
 from app.models.chapter import Chapter
 from app.models.character import Character
-from app.models.memory_node import MemoryNode
+from app.models.memory_node import MemoryNode, NodeType
 from app.core.database import get_session
 from app.agents.reader import ReaderAgent
 
@@ -127,7 +127,7 @@ class RubricBuilder:
         self.session: Optional[AsyncSession] = None
         
     async def __aenter__(self):
-        self.session = await get_session().__anext__()
+        self.session = await get_session().__aenter__()
         return self
         
     async def __aexit__(self, exc_type, exc_val, exc_tb):
@@ -236,13 +236,12 @@ class RubricBuilder:
         # 获取活跃角色
         result = await self.session.execute(
             select(Character).where(
-                Character.novel_id == self.novel_id,
-                Character.is_active == True
+                Character.novel_id == self.novel_id
             )
         )
         characters = result.scalars().all()
         refs["characters"] = [
-            {"id": c.id, "name": c.name, "role": c.role}
+            {"id": c.id, "name": c.name, "role": c.role_type.value if c.role_type else "unknown"}
             for c in characters
         ]
         
@@ -250,13 +249,13 @@ class RubricBuilder:
         result = await self.session.execute(
             select(MemoryNode).where(
                 MemoryNode.novel_id == self.novel_id,
-                MemoryNode.node_type.in_(["plot_point", "foreshadowing", "mystery"]),
+                MemoryNode.node_type.in_([NodeType.PLOT_POINT, NodeType.MYSTERY, NodeType.CONFLICT]),
                 MemoryNode.is_resolved == False
             )
         )
         plot_nodes = result.scalars().all()
         refs["plot_points"] = [
-            {"id": n.id, "type": n.node_type, "title": n.title}
+            {"id": n.id, "type": n.node_type.value if n.node_type else None, "title": n.title}
             for n in plot_nodes
         ]
         
@@ -264,7 +263,7 @@ class RubricBuilder:
         result = await self.session.execute(
             select(MemoryNode).where(
                 MemoryNode.novel_id == self.novel_id,
-                MemoryNode.node_type == "world_fact"
+                MemoryNode.node_type == NodeType.WORLD_BUILDING
             )
         )
         world_nodes = result.scalars().all()
@@ -288,7 +287,7 @@ class StructuredEvaluator:
         self.session: Optional[AsyncSession] = None
         
     async def __aenter__(self):
-        self.session = await get_session().__anext__()
+        self.session = await get_session().__aenter__()
         return self
         
     async def __aexit__(self, exc_type, exc_val, exc_tb):
@@ -508,8 +507,7 @@ class StructuredEvaluator:
         # 获取角色信息
         result = await self.session.execute(
             select(Character).where(
-                Character.novel_id == self.novel_id,
-                Character.is_active == True
+                Character.novel_id == self.novel_id
             )
         )
         characters = result.scalars().all()
@@ -622,7 +620,7 @@ class RubricEvaluationService:
         """批量评测多个章节"""
         results = []
         
-        async with get_session().__anext__() as session:
+        async with get_session() as session:
             for chapter_number in chapter_numbers:
                 # 获取章节内容
                 result = await session.execute(

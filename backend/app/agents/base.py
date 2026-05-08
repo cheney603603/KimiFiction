@@ -40,13 +40,17 @@ class BaseAgent(ABC):
         logger.info(f"初始化智能体: {name}, provider参数: {provider}, model参数: {model}")
     
     @property
-    def llm_service(self) -> LLMService:
+    def llm_service(self):
         """
         动态获取LLM服务
         
-        每次访问时都从配置管理器获取最新的配置，
-        确保Agent始终使用用户在前端配置的LLM设置
+        如果Agent设置了 _llm（TrackedLLMService），优先使用它。
+        否则从配置管理器获取最新的配置。
         """
+        # 优先使用已设置的追踪LLM服务
+        if hasattr(self, '_llm') and self._llm is not None:
+            return self._llm
+        
         # 每次调用时重新获取配置，确保使用最新的配置
         config = LLMConfigManager.get_config()
         provider_str = self._provider or config.get("provider", "openai")

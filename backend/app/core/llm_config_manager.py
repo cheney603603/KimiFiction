@@ -9,8 +9,13 @@ LLM配置管理器
 """
 import json
 import os
+from pathlib import Path
 from typing import Optional, Dict, Any
+from dotenv import load_dotenv
 from loguru import logger
+
+# 确保环境变量在模块加载时就读取 .env
+load_dotenv(verbose=True)
 
 # 全局配置存储（用于存储前端传来的配置）
 _global_config: Dict[str, Any] = {}

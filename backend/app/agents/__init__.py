@@ -5,8 +5,8 @@
 推荐使用 AgentFactory 获取Agent实例，保留旧版独立Agent以兼容现有代码。
 """
 from app.agents.base import BaseAgent
-from app.agents.analyzer import GenreAnalyzerAgent
-from app.agents.discussor import PlotDiscussorAgent
+from app.agents.analyzer import AnalyzerAgent as GenreAnalyzerAgent
+from app.agents.discussor import DiscussorAgent as PlotDiscussorAgent
 from app.agents.character_designer import CharacterDesignerAgent
 from app.agents.outline_generator import OutlineGeneratorAgent
 from app.agents.writer import ChapterWriterAgent

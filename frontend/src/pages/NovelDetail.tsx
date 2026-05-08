@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useParams, Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
-import { BookOpen, Users, FileText, MessageSquare, ChevronRight, Download, X, FileDown, ArrowLeft, Sparkles } from 'lucide-react'
+import { BookOpen, Users, FileText, MessageSquare, ChevronRight, Download, X, FileDown, ArrowLeft, Sparkles, Network, History } from 'lucide-react'
 import { novelApi, chapterApi, characterApi, exportApi } from '../services/api'
 
 export function NovelDetail() {
@@ -71,11 +71,29 @@ export function NovelDetail() {
       color: 'bg-purple-500',
     },
     {
+      title: '实体管理',
+      description: '角色、势力、场景、道具',
+      icon: Network,
+      href: `/novel/${id}/entities`,
+      color: 'bg-indigo-500',
+      badge: '新版',
+      badgeColor: 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400',
+    },
+    {
       title: '大纲编辑',
       description: '查看和编辑剧情大纲',
       icon: FileText,
       href: `/novel/${id}/outline`,
       color: 'bg-orange-500',
+    },
+    {
+      title: '快照管理',
+      description: '查看LLM调用历史，回滚系统状态',
+      icon: History,
+      href: `/novel/${id}/snapshots`,
+      color: 'bg-red-500',
+      badge: 'NEW',
+      badgeColor: 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400',
     },
   ]
 

@@ -1,11 +1,15 @@
 """
 角色设计智能体
 生成详细角色卡和角色关系
+（已集成状态追踪）
 """
 import json
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 from app.agents.base import BaseAgent
 from app.core.json_utils import extract_json_from_response
+from app.services.llm_service_tracked import TrackedLLMService
+from app.services.llm_service import LLMProvider
+from app.core.llm_call_tracker import set_novel_context
 
 
 class CharacterDesignerAgent(BaseAgent):
@@ -35,8 +39,17 @@ class CharacterDesignerAgent(BaseAgent):
 
 输出必须是合法的JSON格式，包含characters数组。"""
     
-    def __init__(self):
+    def __init__(self, novel_id: Optional[int] = None):
         super().__init__("CharacterDesigner", self.SYSTEM_PROMPT)
+        self.novel_id = novel_id
+        if novel_id:
+            self._llm = TrackedLLMService(
+                provider=LLMProvider.DEEPSEEK,
+                novel_id=novel_id,
+                agent_name="character_designer",
+                auto_track=True
+            )
+            set_novel_context(novel_id)
     
     async def process(self, context: Dict[str, Any]) -> Dict[str, Any]:
         """
@@ -48,142 +61,79 @@ class CharacterDesignerAgent(BaseAgent):
         Returns:
             角色设计列表
         """
+        novel_id = context.get("novel_id") or self.novel_id
+        
+        # 设置追踪上下文
+        if novel_id:
+            set_novel_context(novel_id)
+            if not hasattr(self, '_llm') or not self._llm:
+                self._llm = TrackedLLMService(
+                    provider=LLMProvider.DEEPSEEK,
+                    novel_id=novel_id,
+                    agent_name="character_designer",
+                    auto_track=True
+                )
+        
         genre = context.get("genre", "玄幻")
         plot_summary = context.get("plot_summary", "")
-        num_characters = context.get("num_characters", 5)
-        existing_characters = context.get("existing_characters", [])
+        num_protagonists = context.get("num_protagonists", 1)
+        num_supporting = context.get("num_supporting", 3)
         user_input = context.get("user_input", "")
         
-        self.log_action("开始角色设计", {
-            "genre": genre,
-            "num_characters": num_characters,
-            "has_user_input": bool(user_input)
-        })
-        
-        existing_names = ", ".join([c["name"] for c in existing_characters]) if existing_characters else "无"
-        
-        # 用户输入部分
         user_input_section = ""
         if user_input and user_input.strip():
             user_input_section = f"""
 【用户特别要求】
-用户对角色设计的特殊要求（必须优先考虑并融入设计）：
 {user_input}
-
-以上用户要求必须体现在角色设计中，不要忽略用户的创意和想法。
 """
         
         prompt = f"""请为以下小说设计角色阵容：
 
-类型：{genre}
-剧情概要：
-{plot_summary}
-
-已有角色：{existing_names}
+小说类型：{genre}
+剧情概要：{plot_summary}
+主角数量：{num_protagonists}人
+重要配角数量：{num_supporting}人
 {user_input_section}
 
-请设计{num_characters}个角色，包括：
-1. 主角（1-2位）
-2. 主要反派（1-2位），可能是阶段性的，不一定是最终的反派。
-3. 重要配角（2-3位）
-
-输出JSON格式：
+请输出JSON格式：
 {{
   "characters": [
     {{
       "name": "角色名",
       "role_type": "protagonist/antagonist/supporting",
       "profile": {{
-        "age": 年龄,
+        "age": "年龄",
         "gender": "性别",
         "appearance": "外貌描述",
-        "personality": "性格描述",
         "mbti": "MBTI类型",
+        "personality": "性格特征",
         "background": "背景故事",
         "goals": ["目标1", "目标2"],
         "fears": ["恐惧1"],
         "skills": ["技能1", "技能2"],
-        "relationships": {{"角色A": "关系描述"}}
-      }},
-      "arc_description": "角色成长弧线描述"
+        "relationships": {{"角色A": "关系描述"}},
+        "character_arc": "成长弧线"
+      }}
     }}
-  ],
-  "relationship_summary": "角色关系概述"
+  ]
 }}"""
         
         try:
-            react_result = await self.run_react_loop(
-                prompt,
-                context=context,
-                temperature=0.8,
-                output_format="json",
-            )
-            response = react_result["final_text"] or react_result["raw_response"]
+            response = await self._call_llm(prompt, output_format="json")
+            result = extract_json_from_response(response)
             
-            # 使用通用JSON解析工具
-            result, parse_message = extract_json_from_response(response)
-            
-            if result is None:
-                self.log_action("JSON解析失败", {"error": parse_message})
+            if result and "characters" in result:
+                return {
+                    "success": True,
+                    "characters": result["characters"]
+                }
+            else:
                 return {
                     "success": False,
-                    "error": f"JSON解析失败: {parse_message}",
-                    "raw_response": response[:1000]
+                    "error": "无法解析角色数据"
                 }
-            
-            characters = result.get("characters", [])
-            
-            self.log_action("角色设计完成", {
-                "character_count": len(characters)
-            })
-            
-            return {
-                "success": True,
-                "characters": characters,
-                "relationship_summary": result.get("relationship_summary", ""),
-                "_react_trace": react_result["trace"],
-            }
-            
         except Exception as e:
-            self.log_action("角色设计失败", {"error": str(e)})
             return {
                 "success": False,
                 "error": str(e)
             }
-    
-    async def design_single_character(
-        self,
-        role_type: str,
-        genre: str,
-        requirements: str = ""
-    ) -> Dict[str, Any]:
-        """
-        设计单个角色
-        
-        Args:
-            role_type: 角色类型
-            genre: 小说类型
-            requirements: 特殊要求
-            
-        Returns:
-            单个角色设计
-        """
-        prompt = f"""请设计一个{role_type}类型的角色：
-
-小说类型：{genre}
-特殊要求：{requirements}
-
-输出JSON格式。"""
-        
-        react_result = await self.run_react_loop(
-            prompt,
-            context={"agent_loop_steps": 2},
-            temperature=0.8,
-            output_format="json",
-        )
-        response = react_result["final_text"] or react_result["raw_response"]
-        
-        result, _ = extract_json_from_response(response)
-        if result:
-            return result
-        return {"name": "未知角色", "error": "解析失败", "raw": response}

@@ -3,6 +3,7 @@
 使用 Pydantic Settings 管理所有环境变量和配置
 """
 from functools import lru_cache
+from pathlib import Path
 from typing import List, Optional
 from pydantic_settings import BaseSettings, SettingsConfigDict
 from pydantic import Field, field_validator
@@ -10,9 +11,12 @@ from pydantic import Field, field_validator
 
 class Settings(BaseSettings):
     """应用配置类"""
-    
+
+    # .env 文件绝对路径：backend/.env
+    _env_path = Path(__file__).resolve().parent.parent.parent / ".env"
+
     model_config = SettingsConfigDict(
-        env_file=".env",
+        env_file=str(_env_path),
         env_file_encoding="utf-8",
         extra="ignore"
     )
@@ -91,7 +95,10 @@ class Settings(BaseSettings):
     LONG_TERM_MEMORY_INTERVAL: int = Field(default=100, description="长期记忆间隔(章)")
     
     # CORS配置
-    CORS_ORIGINS: List[str] = Field(default=["http://localhost:5173", "http://localhost:5174", "http://127.0.0.1:5173", "http://127.0.0.1:5174"], description="允许的CORS来源")
+    CORS_ORIGINS: str = Field(
+        default='["http://localhost:5173","http://localhost:5174","http://127.0.0.1:5173","http://127.0.0.1:5174"]',
+        description="允许的CORS来源（JSON数组字符串或逗号分隔）"
+    )
 
     @field_validator("DEBUG", mode="before")
     @classmethod
@@ -106,6 +113,34 @@ class Settings(BaseSettings):
             if normalized in {"0", "false", "no", "off", "release", "production", "prod"}:
                 return False
         return value
+
+    @field_validator("CORS_ORIGINS", mode="before")
+    @classmethod
+    def parse_cors_origins(cls, value):
+        """解析CORS来源配置，支持JSON数组字符串或逗号分隔列表。"""
+        if isinstance(value, list):
+            return json.dumps(value)
+        if isinstance(value, str):
+            # 如果已经是 JSON 数组格式，直接返回
+            stripped = value.strip()
+            if stripped.startswith('['):
+                return value
+            # 逗号分隔模式（如 "http://localhost:5173,http://192.168.1.100:5173"）
+            if ',' in stripped:
+                origins = [o.strip() for o in stripped.split(',') if o.strip()]
+                return json.dumps(origins)
+            # 单值模式
+            return json.dumps([stripped])
+        return '["http://localhost:5173"]'
+
+    @property
+    def cors_origins_list(self) -> List[str]:
+        """将CORS_ORIGINS字符串解析为Python列表。"""
+        import json
+        try:
+            return json.loads(self.CORS_ORIGINS)
+        except Exception:
+            return ["http://localhost:5173"]
     
     @property
     def database_url(self) -> str:

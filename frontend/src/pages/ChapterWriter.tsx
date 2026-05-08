@@ -16,9 +16,11 @@ import {
   Eye,
   Star,
   AlertTriangle,
-  Zap
+  Zap,
+  Activity,
+  BarChart3
 } from 'lucide-react'
-import { chapterApi, workflowApi } from '../services/api'
+import { api, chapterApi, workflowApi, novelApi, characterApi, evaluationApi } from '../services/api'
 import type { Chapter } from '../types'
 
 interface WritingSettings {
@@ -44,6 +46,8 @@ export function ChapterWriter() {
   const [activeTaskId, setActiveTaskId] = useState<string | null>(null)
   const [showFeedbackPanel, setShowFeedbackPanel] = useState(false)
   const [showPromptPanel, setShowPromptPanel] = useState(false)
+  const [showEvalPanel, setShowEvalPanel] = useState(false)
+  const [isEvaluating, setIsEvaluating] = useState(false)
   const [settings, setSettings] = useState<WritingSettings>({
     chapter_number: 1,
     writing_style: '现代简洁',
@@ -56,7 +60,7 @@ export function ChapterWriter() {
   // 获取小说信息
   const { data: novel } = useQuery({
     queryKey: ['novel', id],
-    queryFn: () => fetch(`http://localhost:8080/api/v1/novels/${id}`).then(r => r.json()),
+    queryFn: () => novelApi.get(id),
     enabled: !!id,
   })
 
@@ -79,10 +83,8 @@ export function ChapterWriter() {
     queryKey: ['characters', id],
     queryFn: async () => {
       try {
-        const response = await fetch(`http://localhost:8080/api/v1/characters/${id}`)
-        if (!response.ok) return []
-        const result = await response.json()
-        return result.items || []
+        const result = await characterApi.list(id)
+        return (result as any)?.items || []
       } catch (error) {
         console.log('角色数据不可用:', error)
         return []
@@ -165,9 +167,7 @@ export function ChapterWriter() {
     queryKey: ['chapter-feedback', id, selectedChapter],
     queryFn: async () => {
       try {
-        const response = await fetch(`http://localhost:8080/api/v1/workflow/chapter-feedback/${id}/${selectedChapter}`)
-        if (!response.ok) return null
-        const result = await response.json()
+        const result = await api.get(`/workflow/chapter-feedback/${id}/${selectedChapter}`)
         return result
       } catch (error) {
         console.log('读者反馈不可用:', error)
@@ -180,7 +180,54 @@ export function ChapterWriter() {
 
   const readerFeedback = (chapterFeedback as any)?.reader_feedback || {}
   const loopHistory = (chapterFeedback as any)?.loop_history || []
-  const editorReview = (chapterFeedback as any)?.editor_review || {}
+
+  // 获取章节八维评分
+  const { data: chapterEvaluation, refetch: refetchEvaluation } = useQuery({
+    queryKey: ['chapter-evaluation', id, selectedChapter],
+    queryFn: async () => {
+      try {
+        const result = await evaluationApi.getChapterEvaluation(id, selectedChapter)
+        return result
+      } catch (error) {
+        console.log('八维评分数据不可用:', error)
+        return null
+      }
+    },
+    enabled: !!id && !!selectedChapter,
+    retry: false,
+  })
+
+  // 运行章节八维评分
+  const runEvaluationMutation = useMutation({
+    mutationFn: async () => {
+      const result = await evaluationApi.runChapterEvaluation(
+        id, 
+        selectedChapter, 
+        novel?.genre || '玄幻',
+        3
+      )
+      return result
+    },
+    onSuccess: () => {
+      setIsEvaluating(false)
+      refetchEvaluation()
+    },
+    onError: (error: any) => {
+      setIsEvaluating(false)
+      console.error('八维评分失败:', error)
+      alert('评分失败: ' + (error?.message || '未知错误'))
+    },
+  })
+
+  const handleRunEvaluation = () => {
+    const content = generatedContent || (currentChapter as any)?.content
+    if (!content || content.length < 500) {
+      alert('章节内容太短，无法进行八维评分（至少需要500字）')
+      return
+    }
+    setIsEvaluating(true)
+    runEvaluationMutation.mutate()
+  }
 
   // 构建写作提示词预览
   const buildPromptPreview = () => {
@@ -216,8 +263,30 @@ ${previousChapterSummary ? `前情提要：${previousChapterSummary}` : '（第�
 ## 章节细纲
 ${chapterOutline ? `章节标题：${chapterOutline.title || ''}\n章节大纲：${chapterOutline.summary || ''}` : '（无细纲）'}
 
-## 主要人物角色简介
-${characters && characters.length > 0 ? characters.slice(0, 5).map((c: any) => `【${c.name}】(${c.role_type || ''})${c.personality ? ` - 性格：${c.personality}` : ''}`).join('\n') : '（暂无）'}
+## 主要人物角色简介（含当前状态）
+${characters && characters.length > 0 ? characters.slice(0, 5).map((c: any) => {
+  const profile = c.profile || {}
+  const status = c.current_status ? (typeof c.current_status === 'string' ? JSON.parse(c.current_status) : c.current_status) : {}
+  const parts = [`【${c.name}】(${c.role_type || '角色'})`]
+  // 基础人设
+  if (profile.age) parts.push(`年龄：${profile.age}`)
+  if (profile.gender) parts.push(`性别：${profile.gender}`)
+  if (profile.appearance) parts.push(`外貌：${profile.appearance}`)
+  if (profile.personality) parts.push(`性格：${profile.personality}`)
+  if (profile.background) parts.push(`背景：${profile.background}`)
+  if (profile.mbti) parts.push(`MBTI：${profile.mbti}`)
+  if (profile.goals && profile.goals.length > 0) parts.push(`目标：${profile.goals.join('、')}`)
+  if (profile.fears && profile.fears.length > 0) parts.push(`恐惧：${profile.fears.join('、')}`)
+  if (profile.skills && profile.skills.length > 0) parts.push(`技能：${profile.skills.join('、')}`)
+  // 当前动态状态
+  if (status.location) parts.push(`当前位置：${status.location}`)
+  if (status.health) parts.push(`健康状态：${status.health}`)
+  if (status.mood) parts.push(`心情：${status.mood}`)
+  if (status.cultivation_level) parts.push(`修为：${status.cultivation_level}`)
+  if (status.current_goal) parts.push(`当前目标：${status.current_goal}`)
+  if (status.recent_events) parts.push(`最近经历：${status.recent_events}`)
+  return parts.join(' | ')
+}).join('\n') : '（暂无）'}
 
 ${settings.notes ? `## 注意事项\n${settings.notes}` : ''}
 
@@ -288,31 +357,21 @@ ${settings.notes ? `## 注意事项\n${settings.notes}` : ''}
     mutationFn: async (content: string) => {
       // 检查章节是否已存在
       const existingChapter = await chapterApi.getByNumber(id, selectedChapter)
-      
+
       if (existingChapter) {
         // 更新现有章节
-        return fetch(`http://localhost:8080/api/v1/chapters/${(existingChapter as any).id}`, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            content: content,
-            title: chapterOutline?.title || `第${selectedChapter}章`,
-            summary: chapterOutline?.summary,
-          })
+        return chapterApi.update((existingChapter as any).id, {
+          title: chapterOutline?.title || `第${selectedChapter}章`,
+          content: content,
         })
       } else {
         // 创建新章节
-        return fetch(`http://localhost:8080/api/v1/chapters`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            novel_id: id,
-            chapter_number: selectedChapter,
-            title: chapterOutline?.title || `第${selectedChapter}章`,
-            content: content,
-            summary: chapterOutline?.summary,
-            characters_present: characters?.map((c: any) => c.name) || [],
-          })
+        return chapterApi.create({
+          novel_id: id,
+          chapter_number: selectedChapter,
+          title: chapterOutline?.title || `第${selectedChapter}章`,
+          content: content,
+          summary: chapterOutline?.summary,
         })
       }
     },
@@ -719,6 +778,206 @@ ${settings.notes ? `## 注意事项\n${settings.notes}` : ''}
           )}
         </div>
       </div>
+
+      {/* 八维评分展示面板 */}
+      {displayContent && (
+        <div className="mt-4 bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">
+          <button
+            onClick={() => setShowEvalPanel(!showEvalPanel)}
+            className="w-full flex items-center justify-between px-6 py-3 text-left"
+          >
+            <div className="flex items-center gap-2">
+              <BarChart3 className="h-5 w-5 text-indigo-500" />
+              <span className="font-medium text-gray-900 dark:text-white">八维评分</span>
+              {chapterEvaluation?.has_evaluation && (
+                <span className={`text-lg font-bold ml-2 ${
+                  chapterEvaluation.rank === 'S' ? 'text-yellow-500' :
+                  chapterEvaluation.rank === 'A' ? 'text-green-500' :
+                  chapterEvaluation.rank === 'B' ? 'text-blue-500' :
+                  chapterEvaluation.rank === 'C' ? 'text-orange-500' :
+                  'text-red-500'
+                }`}>
+                  {chapterEvaluation.rank}
+                </span>
+              )}
+              {chapterEvaluation?.has_evaluation && (
+                <span className="text-sm text-gray-500">
+                  {chapterEvaluation.total_score}/10
+                </span>
+              )}
+            </div>
+            <div className="flex items-center gap-2">
+              {!chapterEvaluation?.has_evaluation && displayContent && (
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    handleRunEvaluation()
+                  }}
+                  disabled={isEvaluating}
+                  className="px-3 py-1 text-xs bg-indigo-100 text-indigo-700 rounded-lg hover:bg-indigo-200 dark:bg-indigo-900/30 dark:text-indigo-400 disabled:opacity-50 flex items-center gap-1"
+                >
+                  {isEvaluating ? (
+                    <>
+                      <Loader2 className="h-3 w-3 animate-spin" />
+                      评分中...
+                    </>
+                  ) : (
+                    <>
+                      <Activity className="h-3 w-3" />
+                      运行评分
+                    </>
+                  )}
+                </button>
+              )}
+              {showEvalPanel ? <ChevronUp className="h-5 w-5 text-gray-400" /> : <ChevronDown className="h-5 w-5 text-gray-400" />}
+            </div>
+          </button>
+          
+          {showEvalPanel && (
+            <div className="px-6 pb-4 space-y-4 border-t border-gray-100 dark:border-gray-700">
+              {!chapterEvaluation?.has_evaluation ? (
+                <div className="pt-4 text-center text-gray-500 dark:text-gray-400">
+                  <p>该章节尚未进行八维评分</p>
+                  {displayContent && (
+                    <button
+                      onClick={handleRunEvaluation}
+                      disabled={isEvaluating}
+                      className="mt-3 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 disabled:opacity-50 flex items-center gap-2 mx-auto"
+                    >
+                      {isEvaluating ? (
+                        <>
+                          <Loader2 className="h-4 w-4 animate-spin" />
+                          正在评分...
+                        </>
+                      ) : (
+                        <>
+                          <Activity className="h-4 w-4" />
+                          开始八维评分
+                        </>
+                      )}
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="pt-4 space-y-4">
+                  {/* 总分展示 */}
+                  <div className="flex items-center justify-between p-4 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg">
+                    <div>
+                      <p className="text-sm text-indigo-700 dark:text-indigo-300">综合评分</p>
+                      <p className="text-xs text-indigo-600 dark:text-indigo-400">
+                        基于八维 rubric 评测体系
+                      </p>
+                    </div>
+                    <div className="text-right">
+                      <div className={`text-4xl font-black ${
+                        chapterEvaluation.rank === 'S' ? 'text-yellow-500' :
+                        chapterEvaluation.rank === 'A' ? 'text-green-500' :
+                        chapterEvaluation.rank === 'B' ? 'text-blue-500' :
+                        chapterEvaluation.rank === 'C' ? 'text-orange-500' :
+                        'text-red-500'
+                      }`}>
+                        {chapterEvaluation.rank}
+                      </div>
+                      <div className="text-lg font-bold text-gray-700 dark:text-gray-300">
+                        {chapterEvaluation.total_score} <span className="text-sm text-gray-500">/ 10</span>
+                      </div>
+                    </div>
+                  </div>
+
+                  {/* 各维度得分 */}
+                  <div className="space-y-3">
+                    <h5 className="text-sm font-medium text-gray-700 dark:text-gray-300">各维度得分</h5>
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                      {chapterEvaluation.dims?.map((dim: any) => (
+                        <div key={dim.id} className="space-y-1">
+                          <div className="flex justify-between text-xs text-gray-500 dark:text-gray-400">
+                            <span>{dim.name}</span>
+                            <span className="text-gray-400">{dim.weight_pct}%</span>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <div className="flex-1 h-2 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+                              <div 
+                                className={`h-full rounded-full transition-all ${
+                                  dim.score >= 8 ? 'bg-green-500' :
+                                  dim.score >= 6 ? 'bg-blue-500' :
+                                  dim.score >= 4 ? 'bg-orange-500' :
+                                  'bg-red-500'
+                                }`}
+                                style={{ width: `${(dim.score / 10) * 100}%` }}
+                              />
+                            </div>
+                            <span className={`text-sm font-mono w-8 text-right ${
+                              dim.score >= 8 ? 'text-green-600 dark:text-green-400' :
+                              dim.score >= 6 ? 'text-blue-600 dark:text-blue-400' :
+                              dim.score >= 4 ? 'text-orange-600 dark:text-orange-400' :
+                              'text-red-600 dark:text-red-400'
+                            }`}>
+                              {dim.score}
+                            </span>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* 优点 */}
+                  {chapterEvaluation.strengths?.length > 0 && (
+                    <div>
+                      <h5 className="text-sm font-medium text-green-700 dark:text-green-300 mb-2">优点</h5>
+                      <ul className="space-y-1">
+                        {chapterEvaluation.strengths.map((s: string, i: number) => (
+                          <li key={i} className="text-sm text-gray-700 dark:text-gray-300 pl-4 border-l-2 border-green-300 dark:border-green-700">
+                            {s}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {/* 缺点 */}
+                  {chapterEvaluation.weaknesses?.length > 0 && (
+                    <div>
+                      <h5 className="text-sm font-medium text-red-700 dark:text-red-300 mb-2">待改进</h5>
+                      <ul className="space-y-1">
+                        {chapterEvaluation.weaknesses.map((w: string, i: number) => (
+                          <li key={i} className="text-sm text-gray-700 dark:text-gray-300 pl-4 border-l-2 border-red-300 dark:border-red-700">
+                            {w}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {/* 改进建议 */}
+                  {chapterEvaluation.improvement_suggestions?.length > 0 && (
+                    <div>
+                      <h5 className="text-sm font-medium text-blue-700 dark:text-blue-300 mb-2">改进建议</h5>
+                      <ul className="space-y-1">
+                        {chapterEvaluation.improvement_suggestions.map((s: string, i: number) => (
+                          <li key={i} className="text-sm text-gray-700 dark:text-gray-300 pl-4 border-l-2 border-blue-300 dark:border-blue-700">
+                            {s}
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {/* 重新评分按钮 */}
+                  <div className="pt-2">
+                    <button
+                      onClick={handleRunEvaluation}
+                      disabled={isEvaluating}
+                      className="text-xs text-indigo-600 dark:text-indigo-400 hover:text-indigo-800 dark:hover:text-indigo-300 underline"
+                    >
+                      {isEvaluating ? '评分中...' : '重新运行评分'}
+                    </button>
+                  </div>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      )}
 
       {/* 读者评论展示面板 */}
       {(readerFeedback && Object.keys(readerFeedback).length > 0) && (

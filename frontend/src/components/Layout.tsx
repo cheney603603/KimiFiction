@@ -1,5 +1,5 @@
 import { Link, useLocation, useNavigate, Outlet } from 'react-router-dom'
-import { BookOpen, Home, Settings, Moon, Sun, User, LogOut, GitBranch, BarChart3 } from 'lucide-react'
+import { BookOpen, Home, Settings, Moon, Sun, User, LogOut, GitBranch, BarChart3, Sparkles } from 'lucide-react'
 import { useState, useEffect } from 'react'
 
 interface LayoutProps {
@@ -51,6 +51,7 @@ export function Layout(_props: LayoutProps) {
     { path: '/workflow/graph', label: 'Agent协作', icon: GitBranch },
     { path: '/training', label: 'RL训练', icon: BarChart3 },
     { path: '/evaluation', label: '八维评测', icon: BarChart3 },
+    { path: '/evaluation/optimizer', label: '规则优化', icon: Sparkles },
     { path: '/settings/llm', label: 'API配置', icon: Settings },
   ]
 

@@ -1,0 +1,10 @@
+INFO:     Will watch for changes in these directories: ['D:\\310Programm\\KimiFiction\\backend']
+INFO:     Uvicorn running on http://0.0.0.0:8000 (Press CTRL+C to quit)
+INFO:     Started reloader process [71076] using StatReload
+2026-04-30 16:15:41.101 | INFO     | app.core.task_queue:register_handler:143 - 注册任务处理器: generate_chapter
+2026-04-30 16:15:41.101 | INFO     | app.core.task_queue:register_handler:143 - 注册任务处理器: generate_outline
+2026-04-30 16:15:41.101 | INFO     | app.core.task_queue:register_handler:143 - 注册任务处理器: consolidate_memory
+INFO:     Started server process [59916]
+INFO:     Waiting for application startup.
+INFO:     Application startup complete.
+WARNING:  StatReload detected changes in 'app\core\config.py'. Reloading...

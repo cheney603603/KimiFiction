@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.database import get_db
+from app.core.auth import require_auth, get_current_user
 from app.services.novel_service import NovelService
 from app.schemas.novel import (
     NovelCreate,
@@ -80,12 +81,29 @@ async def delete_novel(
     novel_id: int,
     db: AsyncSession = Depends(get_db)
 ):
-    """删除小说（软删除）"""
+    """软删除小说"""
     service = NovelService(db)
     success = await service.delete_novel(novel_id)
     if not success:
         raise HTTPException(status_code=404, detail="小说不存在")
     return {"message": "小说已删除"}
+
+
+@router.delete("/{novel_id}/hard")
+async def hard_delete_novel(
+    novel_id: int,
+    db: AsyncSession = Depends(get_db),
+    current_user: dict = Depends(require_auth)
+):
+    """
+    彻底删除小说（级联删除数据库记录、本地文件、Qdrant 向量数据）
+    二级确认：前端需先弹出确认对话框再调用此接口
+    """
+    service = NovelService(db)
+    result = await service.hard_delete_novel(novel_id)
+    if not result["success"]:
+        raise HTTPException(status_code=404, detail=result["detail"])
+    return result
 
 
 @router.get("/{novel_id}/stats")
