@@ -192,6 +192,8 @@ export const entityApi = {
   
   delete: (entityId: string) =>
     api.delete(`/entities/${entityId}`),
+  batchDelete: (entityIds: string[]) =>
+    api.delete('/entities/batch', { params: { ids: entityIds.join(',') } }),
   
   // 关系API
   createRelationship: (data: {
