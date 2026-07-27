@@ -113,6 +113,38 @@ async def update_entity(
     return entity.to_dict()
 
 
+@router.delete("/batch")
+async def batch_delete_entities(
+    ids: str = Query(..., description="逗号分隔的实体ID列表，如: ent_abc123,ent_def456"),
+    db: AsyncSession = Depends(get_db)
+):
+    """批量删除实体"""
+    import json
+
+    entity_id_list = [eid.strip() for eid in ids.split(",") if eid.strip()]
+    if not entity_id_list:
+        raise HTTPException(status_code=400, detail="未提供有效的实体ID列表")
+
+    #获取所有实体所属novel_id并删除关系
+    for eid in entity_id_list:
+        result = await db.execute(select(Entity).where(Entity.entity_id == eid))
+        entity = result.scalar_one_or_none()
+        if entity:
+            await db.execute(
+                delete(EntityRelationship).where(
+                    and_(
+                        (EntityRelationship.source_id == eid) | (EntityRelationship.target_id == eid)
+                    )
+                )
+            )
+
+    await db.execute(
+        delete(Entity).where(Entity.entity_id.in_(entity_id_list))
+    )
+    await db.commit()
+    return {"message": f"已删除 {len(entity_id_list)} 个实体", "deleted_ids": entity_id_list}
+
+
 @router.delete("/{entity_id}")
 async def delete_entity(
     entity_id: str,
