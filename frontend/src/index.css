@@ -126,3 +126,43 @@
     opacity: 0;
   }
 }
+
+/* ─── ForceGraph (React Flow) 覆盖样式 ─── */
+.react-flow__node {
+  background: transparent;
+  border: none;
+  padding: 0;
+  font-family: inherit;
+}
+.react-flow__node.fg-dim,
+.react-flow__edge.fg-edge-dim {
+  opacity: 0.18;
+  transition: opacity 0.15s ease;
+}
+.react-flow__node:not(.fg-dim),
+.react-flow__edge:not(.fg-edge-dim) {
+  transition: opacity 0.15s ease;
+}
+.react-flow__node.selected .fg-node {
+  transform: scale(1.08);
+}
+.fg-node {
+  cursor: pointer;
+  transition: transform 0.15s ease;
+}
+.react-flow__node:hover .fg-node {
+  transform: scale(1.06);
+}
+.react-flow__controls button {
+  background: #ffffff;
+  border-bottom: 1px solid #e5e7eb;
+  color: #374151;
+}
+:root.dark .react-flow__controls button {
+  background: #1f2937;
+  border-bottom: 1px solid #374151;
+  color: #e5e7eb;
+}
+.react-flow__background {
+  pointer-events: none;
+}

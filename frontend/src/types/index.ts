@@ -14,6 +14,60 @@ export interface Novel {
   updated_at: string
 }
 
+// ===== 世界观聚合数据（实体图谱 / 小说地图 / 知识库共用）=====
+
+export type WorldKind = 'character' | 'faction' | 'skill' | 'item' | 'location'
+
+export interface WorldEntity {
+  id: number
+  entity_id: string
+  novel_id: number
+  canonical_name: string
+  aliases: string[]
+  entity_type: WorldKind
+  state_vector: Record<string, any>
+  narrative_summary?: string
+  last_mentioned_paragraph_id?: number
+  last_mentioned_chapter_number?: number
+  created_at?: string
+  updated_at?: string
+}
+
+export interface WorldRelationship {
+  id: number
+  novel_id: number
+  source_id: string
+  target_id: string
+  relation_type: string
+}
+
+export interface WorldCharacterEdge {
+  source: string
+  target: string
+  relation: string
+}
+
+export interface WorldData {
+  novel_id: number
+  entities: WorldEntity[]
+  relationships: WorldRelationship[]
+  characters: Character[]
+  character_edges: WorldCharacterEdge[]
+  memory_nodes: MemoryNode[]
+  outlines: Outline[]
+  counts: {
+    character: number
+    faction: number
+    location: number
+    item: number
+    skill: number
+    characters_db: number
+    relationships: number
+    memory_nodes: number
+    outlines: number
+  }
+}
+
 export interface NovelStats {
   novel_id: number
   title: string

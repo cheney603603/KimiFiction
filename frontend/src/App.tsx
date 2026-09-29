@@ -6,6 +6,9 @@ import { ChapterReader } from './pages/ChapterReader'
 import { ChapterWriter } from './pages/ChapterWriter'
 import { CharacterManager } from './pages/CharacterManager'
 import { EntityManager } from './pages/EntityManager'
+import { EntityGraph } from './pages/EntityGraph'
+import { NovelMap } from './pages/NovelMap'
+import { KnowledgeBase } from './pages/KnowledgeBase'
 import { OutlineEditor } from './pages/OutlineEditor'
 import { WorkflowChat } from './pages/WorkflowChat'
 import { WorkflowPage } from './pages/WorkflowPage'
@@ -55,6 +58,9 @@ function App() {
         <Route path="novel/:novelId/write" element={<ChapterWriter />} />
         <Route path="novel/:novelId/characters" element={<CharacterManager />} />
         <Route path="novel/:novelId/entities" element={<EntityManager />} />
+        <Route path="novel/:novelId/graph" element={<EntityGraph />} />
+        <Route path="novel/:novelId/map" element={<NovelMap />} />
+        <Route path="novel/:novelId/knowledge" element={<KnowledgeBase />} />
         <Route path="novel/:novelId/outline" element={<OutlineEditor />} />
         <Route path="novel/:novelId/workflow" element={<WorkflowChat />} />
         <Route path="novel/:novelId/workflow/new" element={<WorkflowPage />} />

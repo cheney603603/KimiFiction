@@ -105,6 +105,12 @@ export const novelApi = {
     api.delete(`/novels/${id}/hard`),
 }
 
+// 世界观聚合（实体图谱 / 小说地图 / 知识库共用）
+export const worldApi = {
+  get: (novelId: number) =>
+    api.get<import('../types').WorldData>(`/novels/${novelId}/world`),
+}
+
 // 章节相关API
 export const chapterApi = {
   list: (novelId: number, params?: { skip?: number; limit?: number }) =>
