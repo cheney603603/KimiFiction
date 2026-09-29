@@ -117,3 +117,96 @@ async def get_novel_stats(
     if not stats:
         raise HTTPException(status_code=404, detail="小说不存在")
     return stats
+
+
+@router.get("/{novel_id}/world")
+async def get_novel_world(
+    novel_id: int,
+    db: AsyncSession = Depends(get_db)
+):
+    """
+    获取小说世界观聚合数据（实体图谱/小说地图/知识库共用）
+    返回实体、角色、关系、记忆节点、大纲等全部世界设定数据
+    """
+    from sqlalchemy import select
+
+    from app.models.entity import Entity, EntityRelationship
+    from app.models.character import Character
+    from app.models.memory_node import MemoryNode
+    from app.models.outline import Outline
+
+    def key_of(e: Entity) -> str:
+        """实体类型的小写 key（兼容 CHARACTER/Skill 等历史存储大小写）"""
+        raw = e.entity_type.value if hasattr(e, "entity_type") else str(getattr(e, "entity_type", ""))
+        try:
+            return str(getattr(e.entity_type, "value", raw)).lower()
+        except Exception:
+            return str(raw).lower()
+
+    entities = (await db.execute(
+        select(Entity).where(Entity.novel_id == novel_id)
+    )).scalars().all()
+
+    relationships = (await db.execute(
+        select(EntityRelationship).where(EntityRelationship.novel_id == novel_id)
+    )).scalars().all()
+
+    characters = (await db.execute(
+        select(Character).where(Character.novel_id == novel_id)
+    )).scalars().all()
+
+    memory_nodes = (await db.execute(
+        select(MemoryNode).where(MemoryNode.novel_id == novel_id)
+    )).scalars().all()
+
+    outlines = (await db.execute(
+        select(Outline).where(Outline.novel_id == novel_id).order_by(Outline.volume_number)
+    )).scalars().all()
+
+    # 从角色 profile.relationships 提取关系边（与 /characters/novel/{id}/relationships 同构）
+    character_edges = []
+    char_by_name = {c.name: c for c in characters}
+    for c in characters:
+        profile = c.profile or {}
+        rels = profile.get("relationships")
+        if not isinstance(rels, dict):
+            continue
+        for target_name, relation in rels.items():
+            target = char_by_name.get(target_name)
+            if target:
+                character_edges.append({
+                    "source": str(c.id),
+                    "target": str(target.id),
+                    "relation": str(relation),
+                })
+
+    counted = {"character": 0, "faction": 0, "location": 0, "item": 0, "skill": 0}
+    for e in entities:
+        # 统一用小写 key 归类，兼容历史以大写(CHARACTER)落库的数据，避免拆成两个桶虚增。
+        k = key_of(e)
+        if k in counted:
+            counted[k] += 1
+
+    # 去重：同一 canonical_name 的 character 实体可能被实体抽取重复入库。
+    # 角色概览按“唯一名称”统计，避免与 characters 表角色重复计数而虚高。
+    unique_char_names = {e.canonical_name for e in entities if key_of(e) == "character"}
+    counted["character"] = min(counted["character"], len(unique_char_names) or counted["character"])
+    if unique_char_names:
+        counted["character"] = len(unique_char_names)
+
+    return {
+        "novel_id": novel_id,
+        "entities": [e.to_dict() for e in entities],
+        "relationships": [r.to_dict() for r in relationships],
+        "characters": [c.to_dict() for c in characters],
+        "character_edges": character_edges,
+        "memory_nodes": [m.to_dict() for m in memory_nodes],
+        "outlines": [o.to_dict() for o in outlines],
+        "counts": {
+            **counted,
+            "characters_db": len(characters),
+            "relationships": len(relationships),
+            "memory_nodes": len(memory_nodes),
+            "outlines": len(outlines),
+        },
+    }
