@@ -52,9 +52,11 @@ class EntityExtractionService:
     )
 
     def __init__(self):
+        from app.core.llm_config_manager import LLMConfigManager
+        config = LLMConfigManager.get_config()
         self.llm = LLMService(
             provider=LLMProvider.DEEPSEEK,
-            model="deepseek-v4-pro",
+            model=config.get("model") or "deepseek-chat",
             temperature=0.2,
             max_tokens=4000
         )

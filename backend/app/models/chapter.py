@@ -53,6 +53,16 @@ class Chapter(Base):
     
     # 统计信息
     word_count: Mapped[int] = mapped_column(Integer, default=0, comment="字数统计")
+
+    # 付费积分（兼容线上新增的 chapters.price_points 非空字段）
+    price_points: Mapped[int] = mapped_column(
+        Integer, nullable=False, default=0, comment="章节付费积分"
+    )
+
+    # 读者可见开关（兼容线上新增的 chapters.reader_visible 非空字段）
+    reader_visible: Mapped[bool] = mapped_column(
+        nullable=False, default=True, comment="读者端是否可见"
+    )
     
     # 状态
     status: Mapped[ChapterStatus] = mapped_column(

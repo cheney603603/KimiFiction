@@ -55,31 +55,28 @@ class LLMConfigManager:
 
         # 从全局配置读取（前端通过API设置），最高优先级
         config = default_config.copy()
+        global_keys = set(_global_config.keys())
         config.update(_global_config)
 
-        # 从环境变量读取 - 仅在全局配置为空时才使用
-        if not config.get("provider") or config.get("provider") == "openai":
-            if os.getenv("LLM_PROVIDER"):
-                config["provider"] = os.getenv("LLM_PROVIDER")
+        if os.getenv("LLM_PROVIDER") and "provider" not in global_keys:
+            config["provider"] = os.getenv("LLM_PROVIDER")
+        provider = config.get("provider", "deepseek")
 
-        if not config.get("api_key"):
-            env_key = os.getenv("DEEPSEEK_API_KEY") or os.getenv("LLM_API_KEY")
-            if env_key:
-                config["api_key"] = env_key
-
-        if not config.get("base_url") or config.get("base_url") == "https://api.openai.com/v1":
-            if os.getenv("DEEPSEEK_BASE_URL"):
-                config["base_url"] = os.getenv("DEEPSEEK_BASE_URL")
-            elif os.getenv("LLM_BASE_URL"):
-                config["base_url"] = os.getenv("LLM_BASE_URL")
-            elif os.getenv("CHAT2API_BASE_URL"):
-                config["base_url"] = os.getenv("CHAT2API_BASE_URL")
-
-        if not config.get("model"):
-            if os.getenv("LLM_MODEL"):
-                config["model"] = os.getenv("LLM_MODEL")
-            elif os.getenv("DEEPSEEK_MODEL"):
-                config["model"] = os.getenv("DEEPSEEK_MODEL")
+        # 从环境变量读取 - 仅在全局配置未显式设置对应字段时使用
+        # （例如联影 AI Infra 网关：DEEPSEEK_BASE_URL=https://ai-infra.united-imaging.com/v1）
+        if provider in ("deepseek", "openai", ""):
+            if "api_key" not in global_keys:
+                env_key = os.getenv("DEEPSEEK_API_KEY") or os.getenv("LLM_API_KEY")
+                if env_key:
+                    config["api_key"] = env_key
+            if "base_url" not in global_keys:
+                env_url = os.getenv("DEEPSEEK_BASE_URL") or os.getenv("OPENAI_BASE_URL") or os.getenv("LLM_BASE_URL")
+                if env_url:
+                    config["base_url"] = env_url
+            if "model" not in global_keys:
+                env_model = os.getenv("DEEPSEEK_MODEL") or os.getenv("OPENAI_MODEL") or os.getenv("LLM_MODEL")
+                if env_model:
+                    config["model"] = env_model
 
         if not config.get("response_time"):
             if os.getenv("LLM_RESPONSE_TIME"):

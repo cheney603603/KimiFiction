@@ -245,49 +245,89 @@ class LLMService:
         json_mode: bool = False,
         **kwargs
     ) -> str:
-        """使用DeepSeek API调用（直接调用，不需要chat2api）"""
+        """使用DeepSeek API调用（直接调用，不需要chat2api）
+
+        联影 AI Infra 网关对非流式请求有 ~1000 字节的请求体上限，
+        因此这里始终以流式(stream=true)方式调用，再聚合结果。
+        """
+        import httpx
+
+        class _RetryableLLMError(Exception):
+            pass
+
         config = LLMConfigManager.get_config()
-        
+
         api_key = os.environ.get("DEEPSEEK_API_KEY") or os.environ.get("LLM_API_KEY") or settings.DEEPSEEK_API_KEY
         base_url = os.environ.get("DEEPSEEK_BASE_URL") or settings.DEEPSEEK_BASE_URL
-        
+
         if not api_key:
             raise ValueError("未配置DeepSeek API Key! 请设置DEEPSEEK_API_KEY环境变量")
-        
-        if not self.openai_client:
+
+        model = self.model or settings.DEEPSEEK_MODEL
+        timeout = config.get("timeout") or 300
+
+        payload = {
+            "model": model,
+            "messages": [
+                {"role": m.get("role", "user"), "content": m.get("content", "")}
+                for m in messages
+            ],
+            "temperature": self.temperature,
+            "max_tokens": self.max_tokens,
+            "stream": True,
+        }
+
+        logger.info(f"[LLM] 调用DeepSeek API(流式): model={model}, base_url={base_url}")
+        # 对网关限流/过载(429/5xx)做指数退避重试，保证长时间批量生成稳定。
+        # 联影网关过载可能持续数十分钟：LLM_RETRIES 控制次数，LLM_RETRY_BACKOFF_MAX 控制最大单次等待(默认30分钟)。
+        retries = int(os.environ.get("LLM_RETRIES", "24"))
+        backoff_max = int(os.environ.get("LLM_RETRY_BACKOFF_MAX", "1800"))
+        for attempt in range(1, retries + 1):
             try:
-                from langchain_openai import ChatOpenAI
-                self.openai_client = ChatOpenAI(
-                    model=self.model or settings.DEEPSEEK_MODEL,
-                    temperature=self.temperature,
-                    max_tokens=self.max_tokens,
-                    api_key=api_key,
-                    base_url=base_url,
-                )
-                logger.info(f"DeepSeek客户端已重新初始化: model={self.model or settings.DEEPSEEK_MODEL}")
-            except Exception as e:
-                raise ValueError(f"DeepSeek客户端初始化失败: {e}")
-        
-        try:
-            from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
-            
-            langchain_messages = []
-            for msg in messages:
-                role = msg.get("role", "user")
-                content = msg.get("content", "")
-                if role == "system":
-                    langchain_messages.append(SystemMessage(content=content))
-                elif role == "user":
-                    langchain_messages.append(HumanMessage(content=content))
-                elif role == "assistant":
-                    langchain_messages.append(AIMessage(content=content))
-            
-            logger.info(f"[LLM] 调用DeepSeek API: model={self.model or settings.DEEPSEEK_MODEL}, base_url={base_url}")
-            response = await self.openai_client.ainvoke(langchain_messages)
-            return response.content
-        except Exception as e:
-            logger.error(f"DeepSeek API调用失败: {e}")
-            raise
+                async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
+                    async with client.stream(
+                        "POST", f"{base_url}/chat/completions",
+                        headers={"Authorization": f"Bearer {api_key}"},
+                        json=payload,
+                    ) as resp:
+                        if resp.status_code != 200:
+                            body = (await resp.aread()).decode("utf-8", "replace")
+                            if resp.status_code in (429, 500, 502, 503, 504) and attempt < retries:
+                                raise _RetryableLLMError(body[:200])
+                            raise RuntimeError(
+                                f"DeepSeek API 返回 HTTP {resp.status_code}: {body[:300]}"
+                            )
+                        content = ""
+                        async for line in resp.aiter_lines():
+                            if not line or not line.startswith("data:"):
+                                continue
+                            data = line[5:].strip()
+                            if data == "[DONE]":
+                                break
+                            try:
+                                chunk = json.loads(data)
+                            except json.JSONDecodeError:
+                                continue
+                            choices = chunk.get("choices", [{}])
+                            if not choices:
+                                continue
+                            delta = choices[0].get("delta", {}).get("content")
+                            if delta:
+                                content += delta
+                return content.strip()
+            except _RetryableLLMError as e:
+                backoff = min(2 ** attempt, backoff_max)
+                logger.warning(f"[LLM] 网关过载({e})，{backoff}s后重试 ({attempt}/{retries})")
+                await asyncio.sleep(backoff)
+                continue
+            except httpx.HTTPStatusError:
+                raise
+            except (httpx.TransportError, httpx.TimeoutException, httpx.ConnectError):
+                if attempt >= retries:
+                    raise
+                await asyncio.sleep(min(2 ** attempt, 60))
+                continue
+        raise RuntimeError("DeepSeek API 重试均失败")
     
     async def _chat_local_qwen(
         self,

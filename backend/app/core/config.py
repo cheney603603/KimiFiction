@@ -87,6 +87,10 @@ class Settings(BaseSettings):
     MAX_CHAPTERS: int = Field(default=1000, description="最大章节数")
     DEFAULT_CHAPTER_WORDS: int = Field(default=3000, description="默认章节字数")
     SUMMARY_INTERVAL: int = Field(default=10, description="摘要生成间隔(章)")
+
+    # 章节写入后是否执行 Rubric 八维评测（每次 = 8 次 LLM 调用，开销大，默认关闭以降低 50 章总调用量）
+    RUN_POST_WRITE_RUBRIC: bool = Field(default=False, description="写入章节后是否运行 Rubric 八维评测")
+    RUN_POST_WRITE_ENTITY_EXTRACTION: bool = Field(default=True, description="写入章节后是否对正文做实体抽取")
     
     # 记忆管理配置
     WORKING_MEMORY_CHAPTERS: int = Field(default=3, description="工作记忆章节数")

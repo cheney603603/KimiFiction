@@ -14,6 +14,7 @@ from sqlalchemy import select
 from app.core.redis_client import SessionManager, WorkflowLogsManager
 from app.core.agent_logging import log_agent_workflow
 from app.core.database import get_session
+from app.core.config import settings
 from app.agents import (
     GenreAnalyzerAgent,
     CharacterDesignerAgent,
@@ -1527,7 +1528,7 @@ class WorkflowEngine:
                 })
                 result.data["editor_review"] = review_result
 
-            if chapter_content:
+            if chapter_content and settings.RUN_POST_WRITE_RUBRIC:
                 try:
                     from app.services.rubric_evaluation_service import RubricEvaluationService
 
@@ -1545,7 +1546,7 @@ class WorkflowEngine:
                     logger.warning(f"[write_chapter] Rubric错误详情: {traceback.format_exc()}")
 
             # ── Entity-Aware RAG: 实体抽取与状态更新 ──
-            if chapter_content:
+            if chapter_content and settings.RUN_POST_WRITE_ENTITY_EXTRACTION:
                 try:
                     from app.services.entity_extraction_service import EntityExtractionService
                     from app.services.entity_store_service import EntityStoreService

@@ -121,11 +121,19 @@ class BaseAgent(ABC):
             )
             logger.debug(f"{self.name} LLM响应: {result[:200]}...")
             return result
-            
+
         except Exception as e:
             logger.error(f"{self.name} LLM调用失败: {e}")
             raise
-    
+
+    async def _call_llm(
+        self,
+        prompt: str,
+        **kwargs
+    ) -> str:
+        """兼容旧接口：部分历史 Agent 调用 self._call_llm，统一转发到 call_llm。"""
+        return await self.call_llm(prompt, **kwargs)
+
     async def call_llm_with_history(
         self,
         messages: List[Dict[str, str]],

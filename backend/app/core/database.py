@@ -98,6 +98,21 @@ def _ensure_mysql_schema(sync_conn) -> None:
                 "AFTER arcs"
             )
 
+    if "chapters" in table_names:
+        chapter_columns = {column["name"] for column in inspector.get_columns("chapters")}
+        if "price_points" not in chapter_columns:
+            alter_statements.append(
+                "ALTER TABLE chapters "
+                "ADD COLUMN price_points INT NOT NULL DEFAULT 0 COMMENT '章节付费积分' "
+                "AFTER word_count"
+            )
+        if "reader_visible" not in chapter_columns:
+            alter_statements.append(
+                "ALTER TABLE chapters "
+                "ADD COLUMN reader_visible TINYINT(1) NOT NULL DEFAULT 1 COMMENT '读者端是否可见' "
+                "AFTER price_points"
+            )
+
     for statement in alter_statements:
         logger.warning(f"检测到旧版 MySQL 表结构，自动执行补齐: {statement}")
         sync_conn.execute(text(statement))
