@@ -274,8 +274,6 @@ export default function EvaluationOptimizer() {
     merge: { label: '合并', color: 'bg-blue-900 text-blue-400', icon: '🔗' },
   }
 
-  const getActionDisplay = (action: string) => actionConfig[action as keyof typeof actionConfig] || actionConfig.keep
-
   return (
     <div className="min-h-screen bg-gray-950 text-gray-200 p-6">
       <div className="max-w-7xl mx-auto space-y-6">

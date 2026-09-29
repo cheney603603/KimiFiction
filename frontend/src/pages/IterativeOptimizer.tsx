@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react'
+import { useState, useEffect } from 'react'
 import { evaluationOptimizerApi } from '../services/api'
 
 // ─── 类型定义 ───────────────────────────────────────────────
@@ -250,7 +250,7 @@ export default function IterativeOptimizer() {
   const [selectedBad, setSelectedBad] = useState<string[]>([])
   const [blocksPerNovel, setBlocksPerNovel] = useState(5)
   const [maxBytesPerBlock, setMaxBytesPerBlock] = useState(8000)
-  const [genre, setGenre] = useState('玄幻')
+  const [genre] = useState('玄幻')
 
   // 迭代状态
   const [isRunning, setIsRunning] = useState(false)

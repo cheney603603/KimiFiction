@@ -22,10 +22,15 @@ dist-ssr/
 .vscode/
 .idea/
 
-# Logs
+# Logs / runtime stderr
 logs/
 *.log
+*.err
 backend_log*.txt
+
+# Test screenshots and misdirected capture dirs
+frontend/screenshots/
+backend/frontend/
 
 # Debug output
 debug_llm/

@@ -102,6 +102,7 @@ KimiFiction/
 
 - [快速开始](QUICKSTART.md) - 5分钟启动指南
 - [用户指南](USER_GUIDE.md) - 完整使用说明
+- [LLM调用链说明](docs/LLM_CALL_CHAIN.md) - 全链路调用次数与50章成本估算
 - [Chat2Api使用](CHAT2API_USAGE.md) - 本地AI配置
 - [API文档](http://localhost:8000/docs) - 启动后访问
 
