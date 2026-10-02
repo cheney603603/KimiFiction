@@ -1,5 +1,5 @@
 """端到端验证：用 UIAI(联影网关) Key 驱动真实 LLM，走实体抽取管线，再校验前端世界页。
-用法: python scripts/e2e_uiai.py  (需后端已启动 http://127.0.0.1:8000)
+用法: python scripts/e2e_uiai.py  (需后端已启动 http://127.0.0.1:8080)
 """
 import asyncio
 import sys
@@ -65,7 +65,7 @@ async def main():
 
     # 4. 通过 API 写入实体与关系（复用服务层现有的 http 路径，避免跨事件循环 DB 操作）
     import http.client as _http
-    conn = _http.HTTPConnection("127.0.0.1", 8000)
+    conn = _http.HTTPConnection("127.0.0.1", 8080)
     body = json.dumps({"username": "e2e_test_user", "password": "Test123"})
     conn.request("POST", "/api/v1/auth/login", body, {"Content-Type": "application/json"})
     import json as _j  # noqa
@@ -104,7 +104,7 @@ async def main():
     print(f"[4] 已通过 API 写入实体 {len(created)} 个")
 
     # 6. 校验 world 聚合接口能看到新实体
-    conn = _http.HTTPConnection("127.0.0.1", 8000)
+    conn = _http.HTTPConnection("127.0.0.1", 8080)
     body = json.dumps({"username": "e2e_test_user", "password": "Test123"})
     conn.request("POST", "/api/v1/auth/login", body, {"Content-Type": "application/json"})
     token = _j.loads(conn.getresponse().read())["access_token"]

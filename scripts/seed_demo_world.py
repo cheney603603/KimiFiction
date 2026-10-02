@@ -7,7 +7,7 @@ import sys
 import json
 import urllib.request
 
-BASE = "http://127.0.0.1:8000/api/v1"
+BASE = "http://127.0.0.1:8080/api/v1"
 
 def api(method, path, payload=None, token=None):
     req = urllib.request.Request(f"{BASE}{path}", method=method)

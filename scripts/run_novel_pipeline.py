@@ -11,7 +11,7 @@ import time
 import urllib.request
 import urllib.error
 
-BASE = "http://127.0.0.1:8000/api/v1"
+BASE = "http://127.0.0.1:8080/api/v1"
 USER = "e2e_test_user"
 PASSWORD = "Test123"
 
