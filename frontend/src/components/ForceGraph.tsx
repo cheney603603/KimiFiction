@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, useCallback } from 'react'
 import {
   ReactFlow, ReactFlowProvider, useReactFlow, Background, BackgroundVariant, Controls,
-  MarkerType, type Node, type Edge, type NodeProps, type NodeChange, type XYPosition,
+  Handle, Position, MarkerType, type Node, type Edge, type NodeProps, type NodeChange, type XYPosition,
 } from '@xyflow/react'
 import { forceSimulation, forceLink, forceManyBody, forceCenter, forceCollide } from 'd3-force'
 import { User, Users, MapPin, Package, Zap, BookMarked, Sparkles } from 'lucide-react'
@@ -138,13 +138,28 @@ export function ForceGraph(props: ForceGraphProps) {
 function WorldNodeComponent({ data }: NodeProps<Node<WorldNodeData>>) {
   const color = data.color || KIND_COLORS[data.kind] || '#8b5cf6'
   const Icon = KIND_ICONS[data.kind] || Sparkles
+  // 自定义节点必须提供 Handle，否则 React Flow 找不到边的锚点、整条边都不渲染。
+  // 四个方向各一对 source/target，透明且不可连接，贴合在圆形图标边缘。
+  const handleProps = {
+    className: '!opacity-0 !pointer-events-none !h-2 !w-2',
+    style: { background: 'transparent', border: 'none', position: 'absolute' } as any,
+    isConnectable: false,
+  }
   return (
     <div className="flex flex-col items-center w-28 fg-node select-none">
       <div
-        className="flex items-center justify-center rounded-full w-12 h-12 border-2 border-white dark:border-gray-900 shadow-md"
+        className="relative flex items-center justify-center rounded-full w-12 h-12 border-2 border-white dark:border-gray-900 shadow-md"
         style={{ background: color }}
       >
         <Icon className="w-6 h-6 text-white" />
+        <Handle type="source" position={Position.Top} {...handleProps} />
+        <Handle type="target" position={Position.Top} {...handleProps} />
+        <Handle type="source" position={Position.Bottom} {...handleProps} />
+        <Handle type="target" position={Position.Bottom} {...handleProps} />
+        <Handle type="source" position={Position.Left} {...handleProps} />
+        <Handle type="target" position={Position.Left} {...handleProps} />
+        <Handle type="source" position={Position.Right} {...handleProps} />
+        <Handle type="target" position={Position.Right} {...handleProps} />
       </div>
       <div className="mt-1 max-w-full truncate px-2 py-0.5 rounded-md bg-white/95 dark:bg-gray-900/95 text-xs font-medium text-gray-900 dark:text-gray-100 shadow-sm border border-gray-200 dark:border-gray-700">
         {data.label}
