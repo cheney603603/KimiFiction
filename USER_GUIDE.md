@@ -1,205 +1,122 @@
-# NovelGen 使用指南
+# KimiFiction 使用指南
 
 ## 目录
 1. [系统部署](#系统部署)
 2. [初始配置](#初始配置)
 3. [日常使用](#日常使用)
-4. [故障排除](#故障排除)
+4. [世界观可视化](#世界观可视化)
+5. [评测与写作质量保障](#评测与写作质量保障)
+6. [全流程脚本](#全流程脚本)
+7. [故障排除](#故障排除)
 
 ---
 
 ## 系统部署
 
-### 方法一：Docker Compose 部署（推荐）
+### 方法一：Docker Compose + 本地进程（推荐）
 
 #### 1. 环境准备
 
-确保已安装：
-- Docker (20.10+)
-- Docker Compose (2.0+)
-- Git
+- Docker (20.10+)、Docker Compose (2.0+)
+- Python 3.10+、Node.js 18+
 
-#### 2. 克隆项目
+#### 2. 启动基础设施
 
 ```bash
-git clone <repository-url>
-cd KimiFiction
+docker-compose up -d
 ```
 
-#### 3. 配置环境变量
+| 服务 | 端口 | 用途 | 必需 |
+|------|------|------|------|
+| MySQL | 3306 | 数据存储 | ✅ |
+| Redis | 6379 | 状态缓存/任务队列 | ✅ |
+| Qdrant | 6333/6334 | 向量检索(RAG) | ⚠️ 可选 |
+
+> 不启动 Qdrant 时，记忆检索自动退化为关键词匹配。
+
+#### 3. 配置 LLM
 
 ```bash
-# 复制配置文件
 cp backend/.env.example backend/.env
-
-# 编辑配置
-nano backend/.env  # 或使用你喜欢的编辑器
 ```
 
-#### 4. 选择 LLM 模式并配置
+编辑 `backend/.env`，按需选择：
 
-**方案 A：使用 OpenAI API（推荐用于生产环境）**
+**方案 A：DeepSeek 直连（默认，推荐）**
 
 ```bash
-# backend/.env
+LLM_PROVIDER=deepseek
+DEEPSEEK_API_KEY=sk-xxx
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_MODEL=deepseek-chat
+```
+
+**方案 B：OpenAI API**
+
+```bash
 LLM_PROVIDER=openai
-OPENAI_API_KEY=sk-your-openai-api-key-here
+OPENAI_API_KEY=sk-xxx
 OPENAI_BASE_URL=https://api.openai.com/v1
 OPENAI_MODEL=gpt-4-turbo-preview
 ```
 
-**方案 B：使用 Chat2Api Service（推荐用于开发/测试）**
+**方案 C：chat2api 本地代理（Kimi / 腾讯元宝）**
 
 ```bash
-# backend/.env
-LLM_PROVIDER=kimi  # 可选: kimi, deepseek, yuanbao
-CHAT2API_BASE_URL=http://host.docker.internal:8000
-```
-
-#### 5. 启动服务
-
-```bash
-# 启动所有服务
-docker-compose up -d
-
-# 查看日志
-docker-compose logs -f
-
-# 等待数据库初始化完成（约30秒）
-```
-
-#### 6. 访问系统
-
-- **前端界面**: http://localhost:5173
-- **API文档**: http://localhost:8000/docs
-- **后端API**: http://localhost:8000
-
----
-
-### 方法二：手动部署
-
-#### 1. 启动基础设施
-
-```bash
-# 启动 MySQL
-docker run -d \
-  --name novel_mysql \
-  -e MYSQL_ROOT_PASSWORD=root_password \
-  -e MYSQL_DATABASE=novel_system \
-  -e MYSQL_USER=novel_user \
-  -e MYSQL_PASSWORD=novel_password \
-  -p 3306:3306 \
-  mysql:8.0
-
-# 启动 Redis
-docker run -d \
-  --name novel_redis \
-  -p 6379:6379 \
-  redis:7-alpine
-
-# 启动 Qdrant
-docker run -d \
-  --name novel_qdrant \
-  -p 6333:6333 \
-  qdrant/qdrant:latest
-```
-
-#### 2. 启动后端
-
-```bash
-cd backend
-
-# 创建虚拟环境
-python -m venv venv
-
-# 激活虚拟环境
-# Windows:
-venv\Scripts\activate
-# Linux/Mac:
-# source venv/bin/activate
-
-# 安装依赖
-pip install -r requirements.txt
-
-# 配置环境变量（编辑 .env 文件）
-cp .env.example .env
-
-# 启动服务
+# 另起终端启动 chat2api 服务
+cd chat2api_service
+pip install -r requirements.txt && playwright install
 python main.py
-# 或使用 uvicorn
-uvicorn main:app --reload --host 0.0.0.0 --port 8000
+
+# backend/.env
+LLM_PROVIDER=kimi   # 或 yuanbao
+CHAT2API_BASE_URL=http://localhost:8000
 ```
 
-#### 3. 启动前端
+**方案 D：本地模型**
 
 ```bash
-cd frontend
+# Ollama
+LLM_PROVIDER=local_llama
+OLLAMA_BASE_URL=http://localhost:11434
 
-# 安装依赖
+# 直接加载 GGUF（qwen-2b / qwen-35b），用于训练
+LLM_PROVIDER=local_qwen
+LOCAL_MODEL_ID=qwen-35b
+LOCAL_N_CTX=8192
+```
+
+#### 4. 启动前后端
+
+```bash
+# 后端（8080）
+cd backend
+pip install -r requirements.txt
+python main.py
+
+# 前端（5173，已代理到 8080）
+cd ../frontend
 npm install
-
-# 启动开发服务器
 npm run dev
 ```
 
----
+#### 5. 访问系统
 
-### 方法三：使用 Chat2Api Service（本地AI）
-
-如果你不想使用 OpenAI API，可以使用本地 Chat2Api Service。
-
-#### 1. 启动 Chat2Api Service
-
-```bash
-cd chat2api_service
-
-# 安装依赖
-pip install -r requirements.txt
-playwright install
-
-# 启动服务
-python main.py
-```
-
-#### 2. 完成登录
-
-1. 访问 http://localhost:8000
-2. 选择要使用的 AI（Kimi/DeepSeek/腾讯元宝）
-3. 点击"打开登录页面"
-4. 在浏览器中完成登录
-5. 点击"确认已登录"
-
-#### 3. 配置 NovelGen 使用 Chat2Api
-
-```bash
-# backend/.env
-LLM_PROVIDER=kimi  # 根据你登录的AI选择
-CHAT2API_BASE_URL=http://localhost:8000
-OPENAI_API_KEY=not-needed-for-chat2api
-```
-
-#### 4. 启动 NovelGen
-
-```bash
-docker-compose up -d
-```
+- **前端界面**: http://localhost:5173
+- **API 文档**: http://localhost:8080/docs
 
 ---
 
 ## 初始配置
 
-### 1. 注册管理员账号
+1. 访问 http://localhost:5173 ，点击「立即注册」，填写用户名/密码完成注册
+2. 登录系统
+3. （可选）在「设置 → LLM 配置」页核对/切换模型提供方
+4. （可选）用脚本快速灌入演示世界观数据：
 
-1. 访问 http://localhost:5173
-2. 点击"立即注册"
-3. 填写用户名、邮箱、密码
-4. 完成注册
-
-### 2. 登录系统
-
-1. 访问 http://localhost:5173/login
-2. 输入用户名和密码
-3. 点击登录
+```bash
+python scripts/seed_demo_world.py <novel_id> e2e_test_user Test123
+```
 
 ---
 
@@ -207,283 +124,199 @@ docker-compose up -d
 
 ### 创建新小说
 
-1. **进入工作台**
-   - 登录后自动进入工作台
-   - 或点击顶部导航"工作台"
+1. **进入工作台** → 登录后默认进入，或点顶部导航「工作台」
+2. **创建小说** → 「新建小说」，输入标题，点击创建
+3. **分阶段创作** → 进入小说详情 →「继续创作」：
 
-2. **创建小说**
-   - 点击"新建小说"按钮
-   - 输入小说标题
-   - 点击"创建"
+   AI 依次执行 6 个阶段（可在工作流页实时查看进度）：
+   - **需求分析** - 分析你的想法，推荐类型与风格
+   - **世界观构建** - 生成地域、力量体系、势力等设定
+   - **角色设计** - 创建主角、反派、配角人设
+   - **剧情设计** - 设计主线、转折与爽点
+   - **大纲草案 / 大纲细化** - 生成三卷大纲与章节级大纲
 
-3. **与AI协商剧情**
-   - 点击"继续创作"
-   - 在聊天界面描述你的想法：
-     - "我想写一个玄幻修仙小说"
-     - "主角是一个废柴少年"
-     - "要有退婚流、金手指元素"
-   
-4. **确认类型**
-   - AI会分析你的需求并推荐类型
-   - 确认或修改类型建议
-
-5. **讨论剧情**
-   - 与AI讨论主线剧情
-   - 确定世界观设定
-   - 讨论关键转折点
-
-6. **生成角色**
-   - 点击"生成角色设计"
-   - AI会自动创建主角、反派、配角
-   - 查看和编辑角色人设
-
-7. **生成大纲**
-   - 点击"生成剧情大纲"
-   - AI会创建三卷大纲
-   - 查看分卷结构和剧情弧
-
-8. **开始写作**
-   - 点击"开始自动撰写"
-   - 选择自动模式或手动模式
-   - AI开始生成章节
+4. **自动撰写** → 点击「开始自动撰写」，选择自动/手动模式，AI 开始生成章节
+5. **阅读** → 章节生成后可实时阅读，支持字号调整、夜间模式、上一章/下一章
 
 ### 查看和管理小说
 
-#### 阅读小说
+- **阅读小说**：小说详情 →「阅读小说」→ 选择章节
+- **管理角色**：「角色管理」→ 卡片式查看/编辑角色，查看角色时间线
+- **编辑大纲**：「大纲编辑」→ 查看分卷结构、展开剧情弧、手动调整
+- **导出小说**：详情页右上角「导出」→ TXT / Markdown / JSON / 角色设定 / 大纲
+- **监控生成进度**：工作流页实时状态，或 `GET /api/v1/workflow/progress/{novel_id}`
 
-1. 进入小说详情页
-2. 点击"阅读小说"
-3. 在章节列表中选择章节
-4. 使用阅读器功能：
-   - 调整字体大小
-   - 切换夜间模式
-   - 查看目录
-   - 上一章/下一章
+### 管理实体（世界观数据）
 
-#### 管理角色
+实体共五类：`character`(角色)、`faction`(势力)、`skill`(功法)、`item`(物品)、`location`(地点)。
 
-1. 进入"角色管理"
-2. 查看所有角色卡片
-3. 点击角色查看详情
-4. 编辑角色信息
-5. 查看角色时间线
-
-#### 编辑大纲
-
-1. 进入"大纲编辑"
-2. 查看分卷结构
-3. 展开剧情弧查看详情
-4. 手动调整大纲（如果需要）
-
-### 导出小说
-
-1. 进入小说详情页
-2. 点击右上角"导出"按钮
-3. 选择导出格式：
-   - **TXT**: 纯文本，适合阅读
-   - **Markdown**: 带目录结构
-   - **JSON**: 完整数据备份
-   - **角色设定**: 导出所有角色
-   - **大纲**: 导出剧情大纲
-
-### 监控生成进度
-
-1. 在"继续创作"页面查看实时状态
-2. WebSocket会推送生成进度
-3. 查看任务队列状态（API）
+- **查看**：进入「实体管理」页，按类型筛选、搜索
+- **新增/编辑**：填写名称、别名、类型、状态向量、叙事摘要
+- **关系**：实体之间建立/编辑关系边（如「师徒」「敌对」）
+- **批量删除**：勾选多个实体后批量删除
+- **自动抽取**：每章写入后系统自动抽取实体与关系（`RUN_POST_WRITE_ENTITY_EXTRACTION=true`），无需手工录入
 
 ---
 
-## 高级功能
+## 世界观可视化
 
-### 手动触发章节生成
+三个页面共用后端聚合接口 `GET /api/v1/novels/{id}/world`（返回实体、关系、角色、记忆节点、大纲）。
+
+### 实体图谱（`/novel/:id/graph`）
+
+- 力导向图展示实体与关系，节点按类型着色
+- 点击节点查看详情，支持自定义/新增节点
+- 地图可缩放拖拽，关系边实时联动
+
+### 小说地图（`/novel/:id/map`）
+
+- 地点类实体（location）与剧情路线的可视化
+- 查看各地点的设定与关联事件/角色
+
+### 知识库（`/novel/:id/knowledge`）
+
+- 记忆节点、世界观设定、大纲的统一检索视图
+- 支持按类型/关键词过滤，是长文本记忆的入口
+
+> 提示：实体图谱/地图/知识库若为空，先用 `seed_demo_world.py` 灌入演示数据，或确认已走过「世界观构建/角色设计」阶段。
+
+---
+
+## 评测与写作质量保障
+
+### LLM 八维评测
+
+「评测」页支持：
+
+- **小说章节评测**：选小说 → 章节号 → 运行评测
+- **文本评测**：粘贴任意文本
+- **参考作品评测**：选择 `evaluate_rules_llm.csv` 规则集或参考文件
+
+八维维度（权重可配）：情节一致性、风格匹配度、逻辑合理性、角色一致性、世界观一致性、叙事流畅度等，输出总分/等级/雷达图，评测历史可追溯。
+
+**相关 API**：`POST /api/v1/training/evaluate/{novel_id}`、`/api/v1/training/evaluation/run`、`/evaluation/history`。
+
+### 评测规则优化器（`/evaluation/optimizer`）
+
+根据历史评测结果与失败样本，自动迭代 LLM 评判规则（`evaluate_rules_llm.csv`），减少误判，提升评测稳定性。
+
+### 写作质量管线 V2（`WRITING_PIPELINE_V2=true` 时启用）
+
+章节撰写走「场景节拍规划 → 逐场景生成(3×~1000字) → 规则化缝合」：
+
+- **确定性硬门禁**：字数达成率、结尾终止、场景均衡、角色名白名单、力量等级白名单、伏笔台账；未过则定向重写 ≤1 次，仍不过标记 `flagged`（章节状态为 flagged，待人工复审）
+- **反模板化**：章节类型池（冲突/过渡/情绪/信息/群像），禁止连续 3 章同型
+- **风格锚点**：小说 `style_profile.samples` 中的真人样本作为 few-shot 注入（无样本则不注入）
+- **异构盲评**：匿名审稿人 persona 打分（`score/naturalness/looks_ai`），打破同模型自评闭环
+- **三尺度诊断**：句长方差、AI 高频词命中、段落熵、总结句密度、跨章开头相似度、情绪曲线相关 —— 写入章节元数据，仅供人工查看，不参与打分
+- **成本熔断**：单章 LLM 调用预算（`llm_call_budget_per_chapter`，默认 8），超限跳过重写直接标记
+
+### 伏笔台账
+
+- 从剧情设定的 `unresolved_mysteries / foreshadowing` 自动埋设伏笔
+- 每章写入时检查超期未回收项（默认 10 章内应回收），超期进入硬门禁告警
+
+### 状态快照
+
+「快照」页可对小说创作进度保存/恢复快照，便于回溯实验。
+
+---
+
+## 全流程脚本
+
+`scripts/run_novel_pipeline.py` 面向无人值守批处理，默认账号 `e2e_test_user / Test123`：
 
 ```bash
-# 使用API直接生成章节
-curl -X POST http://localhost:8000/api/v1/chapters/generate \
-  -H "Authorization: Bearer your-token" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "novel_id": 1,
-    "chapter_number": 10,
-    "outline_guidance": "这一章主角要突破境界"
-  }'
+# 设计阶段（6 阶段顺序执行）
+python scripts/run_novel_pipeline.py design --title "修真大佬重返都市" --genre "都市修真" --idea "主角..."
+
+# 批量写章节（每章完成后自动落库到 logs/chXXX.txt）
+python scripts/run_novel_pipeline.py chapters --novel <id> --from 1 --count 5 --until 100
+
+# 查看进度
+python scripts/run_novel_pipeline.py status --novel <id>
+
+# 断点续跑（跳过已完成阶段）
+python scripts/run_novel_pipeline.py design --novel <id> --from-phase world_building
 ```
 
-### 整理记忆（长文本优化）
+内置机制：阶段/章节失败自动重试（指数退避）、连续失败休息 10 分钟缓解网关压力、章节「任务态+是否入库」双判定。
 
-当章节数超过50章时，建议整理记忆：
+其他脚本：
 
-```bash
-curl -X POST http://localhost:8000/api/v1/memory/consolidate/1 \
-  -H "Authorization: Bearer your-token" \
-  -d '{
-    "chapter_threshold": 50
-  }'
-```
-
-### 搜索记忆
-
-```bash
-curl -X POST http://localhost:8000/api/v1/memory/search \
-  -H "Authorization: Bearer your-token" \
-  -d '{
-    "novel_id": 1,
-    "query": "主角的武器",
-    "top_k": 5
-  }'
-```
+- `scripts/seed_demo_world.py <novel_id>` - 灌入演示世界观
+- `scripts/verify_world_pages.py` / `screenshot_world_pages.py` - 可视化页面验收
+- `scripts/comprehensive_test.py` / `scripts/e2e_uiai.py` - 端到端测试
 
 ---
 
 ## 故障排除
 
-### 问题1：无法连接到数据库
-
-**症状**: 后端启动失败，报错"Can't connect to MySQL"
-
-**解决**:
-```bash
-# 检查MySQL容器状态
-docker ps | grep mysql
-
-# 如果没有运行，启动它
-docker start novel_mysql
-
-# 或重新创建
-docker-compose up -d mysql
-```
-
-### 问题2：LLM调用失败
-
-**症状**: 生成章节时报错
-
-**OpenAI模式**:
-```bash
-# 检查API Key
-echo $OPENAI_API_KEY
-
-# 测试API
-curl https://api.openai.com/v1/models \
-  -H "Authorization: Bearer your-api-key"
-```
-
-**Chat2Api模式**:
-```bash
-# 检查chat2api_service是否运行
-curl http://localhost:8000/api/status
-
-# 检查登录状态
-curl http://localhost:8000/api/status/kimi
-```
-
-### 问题3：前端无法连接后端
-
-**症状**: 页面加载但数据为空
-
-**解决**:
-1. 检查后端是否运行: `curl http://localhost:8000/health`
-2. 检查CORS配置
-3. 检查前端代理配置 `frontend/vite.config.ts`
-
-### 问题4：章节生成卡住
-
-**症状**: 任务状态一直是"pending"
-
-**解决**:
-```bash
-# 检查Redis连接
-docker exec novel_redis redis-cli ping
-
-# 查看任务队列
-docker logs novel_backend | grep "任务队列"
-
-# 重启后端
-docker-compose restart backend
-```
-
-### 问题5：内存不足（生成长小说时）
-
-**解决**:
-```bash
-# 增加Docker内存限制
-docker-compose down
-
-# 编辑 docker-compose.yml，增加内存限制
-# 然后重新启动
-docker-compose up -d
-```
-
----
-
-## 最佳实践
-
-### 1. 定期备份
+### 问题 1：无法连接到数据库
 
 ```bash
-# 备份数据库
-docker exec novel_mysql mysqldump -u novel_user -p novel_system > backup.sql
-
-# 备份小说数据（导出JSON）
-curl http://localhost:8000/api/v1/export/novel/1/json \
-  -H "Authorization: Bearer your-token" \
-  > novel_backup.json
+docker ps | grep mysql          # 检查容器
+docker-compose up -d mysql      # 重新拉起
 ```
 
-### 2. 监控资源使用
+### 问题 2：LLM 调用失败
 
-```bash
-# 查看容器资源使用
-docker stats
+- DeepSeek：检查 `DEEPSEEK_API_KEY`；非流式请求 >1000 字节会被网关拒绝，应用已改流式调用
+- chat2api：`curl http://localhost:8000/api/status/kimi` 检查登录态
+- 本地模型：确认模型路径与显存配置（CPU 模式设 `LOCAL_N_GPU_LAYERS=0`）
 
-# 查看日志
-docker-compose logs -f --tail=100
-```
+### 问题 3：前端连不上后端
 
-### 3. 优化生成速度
+- 检查后端是否运行：`curl http://localhost:8080/health`
+- 前端 5173 已代理 `/api` 到 8080；若改端口需同步修改 `frontend/vite.config.ts`
+- 检查 CORS：`backend/.env` 的 `CORS_ORIGINS` 需包含 `http://localhost:5173`
 
-- 使用更快的LLM（如GPT-3.5-turbo代替GPT-4）
-- 减少每章目标字数
-- 使用本地Chat2Api Service避免网络延迟
+### 问题 4：章节生成卡住/失败
 
-### 4. 保持剧情连贯
+- 检查 Redis：`docker exec kimi_redis redis-cli ping`
+- 查看任务状态：`GET /api/v1/workflow/task-progress/{task_id}`
+- 查看日志：`logs/app.log`，或 `docker-compose logs -f backend`
+- 全流程脚本自带重试，普通界面触发失败可稍后重试
 
-- 每生成50章整理一次记忆
-- 定期检查角色状态是否一致
-- 使用"一致性检查"功能
+### 问题 5：实体图谱连线不显示
+
+- 确认节点已建立关系边（实体管理页可见 relationship）
+- 前端自定义节点需挂载 Handle 组件（`96f2783` 已修复默认场景）
 
 ---
 
 ## 常用命令速查
 
 ```bash
-# 启动所有服务
+# 启动基础设施
 docker-compose up -d
 
-# 停止所有服务
-docker-compose down
+# 启动后端（8080）
+cd backend && python main.py
 
-# 查看日志
+# 启动前端（5173）
+cd frontend && npm run dev
+
+# 停止/查看日志
+docker-compose down
 docker-compose logs -f
 
-# 重启后端
-docker-compose restart backend
-
 # 进入数据库
-docker exec -it novel_mysql mysql -u novel_user -p novel_system
+docker exec -it kimi_mysql mysql -u novel_user -p novel_system
 
-# 进入Redis
-docker exec -it novel_redis redis-cli
+# 进入 Redis
+docker exec -it kimi_redis redis-cli
 
-# 更新代码后重建
-docker-compose up -d --build
+# 全流程脚本
+python scripts/run_novel_pipeline.py status --novel <id>
 ```
 
 ---
 
 ## 获取帮助
 
-- **API文档**: http://localhost:8000/docs
-- **项目文档**: 查看 README.md
-- **Chat2Api文档**: 查看 CHAT2API_USAGE.md
-- **提交Issue**: 在GitHub仓库提交问题
+- **API 文档**: http://localhost:8080/docs
+- **项目文档**: [README.md](README.md) / [QUICKSTART.md](QUICKSTART.md)
+- **Chat2Api**: [CHAT2API_USAGE.md](CHAT2API_USAGE.md)
+- **调用链与成本**: [docs/LLM_CALL_CHAIN.md](docs/LLM_CALL_CHAIN.md)
+- **提交 Issue**: GitHub 仓库

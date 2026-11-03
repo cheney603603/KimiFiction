@@ -1,126 +1,80 @@
-# KimiFiction 项目改造完成 - 准备测试
+# KimiFiction 项目进度
 
-## 📅 日期：2026-03-30 14:00 GMT+8
+**最后更新**: 2026-11-03
 
 ---
 
-## ✅ 改造完成总结
+## ✅ 已完成模块
 
-所有代码改造已完成，新增了Docker一键启动配置。
+### 1. 基础框架与部署
+- [x] Docker Compose 一键启动（MySQL / Redis / Qdrant）
+- [x] 前后端分离架构（React 5173 → FastAPI 8080）
+- [x] JWT 认证、WebSocket 实时推送、Redis 任务队列
+
+### 2. 多智能体创作管线
+- [x] 12+ Agent / 6 阶段工作流（需求分析 → 世界观构建 → 角色设计 → 剧情设计 → 大纲草案 → 大纲细化）
+- [x] LangGraph 工作流编排 + 状态快照 + 任务进度追踪
+- [x] 长文本记忆（RAG 向量检索 + 分层摘要，1000 章不遗忘）
+- [x] 章节自动撰写 + 实体自动抽取回流知识库
+
+### 3. 世界观可视化与实体管理
+- [x] 实体管理 API + 页面（character/faction/skill/item/location 五类，关系边，批量删除）
+- [x] 世界观聚合接口 `GET /novels/{id}/world`
+- [x] 可视化三页：实体图谱（ReactFlow 力导向图）/ 小说地图 / 知识库
+- [x] 演示世界观种子脚本 `scripts/seed_demo_world.py`
+
+### 4. LLM 接入
+- [x] DeepSeek 直连（默认，含联影网关兼容、流式调用）
+- [x] OpenAI / chat2api（Kimi/元宝）/ Ollama
+- [x] 本地 GGUF 模型（Qwen3.5-2B / 35B-A3B），CPU/RTX4070 自适应
+
+### 5. 写作质量管线与评测
+- [x] Rubric 八维评测（LLM-as-Judge，权重可配，历史可追溯）
+- [x] 评测规则优化器（`evaluation_optimizer`，迭代 `evaluate_rules_llm.csv`）
+- [x] 确定性硬门禁（字数/结尾/场景均衡/角色名白名单/力量等级白名单/伏笔台账，≤1 次定向重写，仍不过标记 flagged）
+- [x] 写作管线 V2（分场景生成 3×~1000字 + 场景节拍规划 + 规则化缝合，开关 `WRITING_PIPELINE_V2`）
+- [x] 反模板化（章节类型池 5 类，禁 3 连同型）与风格锚点（style_profile few-shot，无样本降级）
+- [x] 异构盲评（匿名审稿人 persona）与三尺度诊断指标（句长方差/AI词命中/段落熵/总结句密度/跨章相似度/情绪曲线）
+- [x] 成本熔断（单章 LLM 调用预算，超限跳过重写）与伏笔台账（埋设/回收/超期检测）
+- [x] 移除 RL 训练体系（GRPO/TPO/模仿/LoRA 已清理，LLM-Judge/数据审计/八维评测保留）
+
+### 6. 运维与自动化
+- [x] 全流程驱动脚本 `scripts/run_novel_pipeline.py`（design/full/status，断点续跑 `--from-phase`，`full --watch` 守护，`--webhook` 通知）
+- [x] 端到端测试脚本（`comprehensive_test.py` / `e2e_uiai.py` / `test_frontend.py`）
+- [x] 世界观页面验收脚本（`verify_world_pages.py` / `screenshot_world_pages.py`）
+- [x] 数据导出（TXT/Markdown/JSON/角色/大纲）与 EPUB
 
 ---
 
 ## 🚀 一键启动
 
-### Windows 用户
+```bash
+docker-compose up -d          # MySQL/Redis/Qdrant
+cd backend && python main.py  # 后端 8080
+cd frontend && npm run dev    # 前端 5173
+```
 
-双击运行 `D:\310Programm\KimiFiction\start.bat`
+Windows 直接运行 `start.bat`。
 
-### 手动启动
+## 🎯 快速验收路线
 
 ```bash
-cd D:\310Programm\KimiFiction
+# 1. 灌入演示世界观（可视化三页验收）
+python scripts/seed_demo_world.py <novel_id> e2e_test_user Test123
 
-# 1. 启动Docker服务
-docker-compose up -d
+# 2. 全流程设计阶段（6 阶段自动跑通）
+python scripts/run_novel_pipeline.py design --title "修真大佬重返都市" --genre "都市修真" --idea "..."
 
-# 2. 等待10秒让MySQL就绪
-timeout /t 10
-
-# 3. 启动后端
-cd backend
-python -m uvicorn app.main:app --reload --port 8000
-
-# 4. 启动前端（新窗口）
-cd frontend
-npm run dev
+# 3. 批量写章节
+python scripts/run_novel_pipeline.py chapters --novel <id> --from 1 --count 5
 ```
 
 ---
 
-## 📦 Docker服务说明
+## 📋 下一步计划
 
-| 服务 | 端口 | 用途 | 必需 |
-|------|------|------|------|
-| **MySQL** | 3306 | 数据库存储 | ✅ |
-| **Redis** | 6379 | 状态缓存 | ✅ |
-| **Qdrant** | 6333 | 向量数据库(RAG) | ⚠️ 可选 |
-
-### Qdrant（可选）
-Qdrant用于RAG功能。如果不启动：
-- RAG使用轻量级关键词匹配替代
-- 其他功能不受影响
-
----
-
-## 🔧 启动后访问
-
-| 服务 | 地址 |
-|------|------|
-| **前端界面** | http://localhost:5173 |
-| **后端API** | http://localhost:8000 |
-| **API文档** | http://localhost:8000/docs |
-
----
-
-## 📋 测试步骤
-
-1. **打开浏览器** → http://localhost:5173
-2. **注册/登录**
-3. **创建小说**
-4. **点击「AI创作助手」(新版)**
-5. **测试各功能**
-
----
-
-## 📁 项目文件结构
-
-```
-D:\310Programm\KimiFiction\
-├── docker-compose.yml     # Docker配置（一键启动）
-├── start.bat             # Windows一键启动脚本
-├── stop.bat             # 停止脚本
-├── TEST_GUIDE.md         # 详细测试指南
-│
-├── backend/
-│   ├── app/
-│   │   ├── workflow_engine.py      # 工作流引擎
-│   │   ├── context_manager.py     # RAG+上下文压缩
-│   │   ├── file_manager.py        # 文件管理
-│   │   ├── agents/               # Agent模块
-│   │   └── api/endpoints/        # API端点
-│   └── ...
-│
-└── frontend/
-    └── src/
-        ├── pages/WorkflowPage.tsx # 新版工作流页面
-        └── ...
-```
-
----
-
-## ❓ 常见问题
-
-### Q: Docker启动失败？
-```
-检查：
-1. Docker Desktop是否运行？
-2. 端口是否被占用？
-   netstat -an | findstr "3306 6379 6333"
-```
-
-### Q: 端口被占用？
-```
-停止占用端口的进程，或修改docker-compose.yml中的端口映射
-```
-
-### Q: 需要停止所有服务？
-```
-运行 stop.bat 或 docker-compose down
-```
-
----
-
-**改造完成时间**: 2026-03-30 14:00 GMT+8
-**状态**: ✅ 准备就绪
-**下一步**: 双击 `start.bat` 开始测试！
+- [ ] 更多图表类型（时间线、情感曲线）
+- [ ] 盲读 A/B 验收（改造前 A 组 vs 改造后 B 组，§8 协议）
+- [ ] 评测反馈回流写作提示词（评分驱动定向修订）
+- [ ] 集成测试覆盖与性能基准
+- [ ] 细粒度人工干预（单章改写/剧情分支）
