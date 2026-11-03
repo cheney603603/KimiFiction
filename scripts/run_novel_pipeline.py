@@ -101,7 +101,7 @@ def run_phase(token, novel_id, phase, input_data=None, attempts=10):
         if ok:
             return True
         # 失败后等待流量缓解再重试
-        delay = [0, 60, 120, 300, 600, 900, 1200, 1500, 1800, 1800][min(attempt, 10) - 1]
+        delay = [0, 20, 40, 60, 120, 180, 300, 300, 300, 300][min(attempt, 10) - 1]
         if attempt < attempts:
             print(f"    等待 {delay}s 后重试...")
             time.sleep(delay)
@@ -141,7 +141,7 @@ def _summarize_phase(phase, result):
         print("    [result] ", s(result))
 
 
-def write_chapter(token, novel_id, chapter_number, poll_max=3600, attempts=10):
+def write_chapter(token, novel_id, chapter_number, poll_max=1500, attempts=10):
     for attempt in range(1, attempts + 1):
         print(f"\n=== [chapter {chapter_number}] (尝试 {attempt}/{attempts}) ===")
         payload = {
@@ -174,7 +174,7 @@ def write_chapter(token, novel_id, chapter_number, poll_max=3600, attempts=10):
             return True
         if ok and ch is None:
             ok = False
-        delay = [0, 60, 120, 300, 600, 900, 1200, 1500, 1800, 1800][min(attempt, 10) - 1]
+        delay = [0, 20, 40, 60, 120, 180, 300, 300, 300, 300][min(attempt, 10) - 1]
         if attempt < attempts:
             print(f"    等待 {delay}s 后重试...")
             time.sleep(delay)
@@ -280,7 +280,7 @@ def cmd_chapters(argv):
             print(f"   >>> 进度: {done}/{end - start_n + 1} 章（累计失败 {failed}）")
         # 若连续失败 3 次，等待 10 分钟缓解网关压力后再继续
         if failed >= 3:
-            print("   连续失败过多，休息 600s 缓解网关压力...")
+            print("   连续失败过多，休息 120s 缓解网关压力...")
             time.sleep(600)
             failed = 0
     print(f"\n章节批量完成：共尝试 {end - start_n + 1} 章")
@@ -377,7 +377,7 @@ def cmd_full(argv):
             failed += 1
             print(f"   [失败] 第{n}章，连续失败 {failed} 次")
             if failed >= 3:
-                print("   连续失败过多，休息 600s 缓解网关压力...")
+                print("   连续失败过多，休息 120s 缓解网关压力...")
                 time.sleep(600)
                 failed = 0
             if not watch and failed >= 2:

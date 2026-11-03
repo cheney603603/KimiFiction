@@ -47,12 +47,23 @@ class GateResult:
         return "; ".join(f"{c.rule}: {c.detail}" for c in self.failures)
 
 
-# 常见姓氏（用于臆造人名探测；姓名长度 2-4 字的组合）
-_SURNAMES = set("赵钱孙李周吴郑王冯陈褚卫蒋沈韩杨朱秦尤许何吕施张孔曹严华金魏陶姜"
-                 "戚谢邹喻柏水窦章云苏潘葛奚范彭郎鲁韦昌马苗凤花方俞任袁柳酆鲍史唐"
-                 "费廉岑薛雷贺倪汤滕殷罗毕郝邬安常乐于时傅皮卞齐康伍余元卜顾孟平黄"
-                 "和林萧叶江吴秦楚司马欧阳上官诸葛司徒夏侯尉迟公孙独孤慕容南宫端木"
-                 "东方皇甫令狐呼延拓跋宇文百里呼延第五完颜"[:200])
+# 单字姓氏（用于臆造人名探测锚点；复合姓氏另行处理）
+_SINGLE_SURNAMES = "赵钱孙李周吴郑王冯陈褚卫蒋沈韩杨朱秦尤许何吕施张孔曹严华金魏陶姜" \
+                   "戚谢邹喻柏水窦章云苏潘葛奚范彭郎鲁韦昌马苗凤花方俞任袁柳酆鲍史唐" \
+                   "费廉岑薛雷贺倪汤滕殷罗毕郝邬安常乐于时傅皮卞齐康伍余元卜顾孟平黄" \
+                   "和林萧叶江吴秦楚"
+
+# 复合姓氏（2 字，先匹配）
+_COMPOUND_SURNAMES = [
+    "司马", "欧阳", "上官", "诸葛", "司徒", "夏侯", "尉迟", "公孙", "独孤",
+    "慕容", "南宫", "端木", "东方", "皇甫", "令狐", "呼延", "拓跋", "宇文",
+    "百里", "第五", "完颜",
+]
+
+# 姓名锚点正则：复合姓氏优先（最长匹配），其次单字姓氏
+_ANCHOR_RE = re.compile(
+    r"(?:" + "|".join(sorted(_COMPOUND_SURNAMES, key=len, reverse=True)) + r"|[" + _SINGLE_SURNAMES + r"])"
+)
 
 
 class ChapterHardGate:
@@ -62,11 +73,13 @@ class ChapterHardGate:
         self,
         target_words: int = 3000,
         word_ratio_threshold: float = 0.85,
-        name_suspect_threshold: int = 3,
+        name_suspect_threshold: int = 8,
+        name_min_freq: int = 3,
     ):
         self.target_words = target_words
         self.word_ratio_threshold = word_ratio_threshold
         self.name_suspect_threshold = name_suspect_threshold
+        self.name_min_freq = name_min_freq
 
     def check(
         self,
@@ -209,15 +222,15 @@ class ChapterHardGate:
 
         freq: Counter = Counter()
         length = len(content)
-        for m in re.finditer(r'[一-鿿]', content):
-            if m.group() not in _SURNAMES:
-                continue
-            i = m.start()
-            for span in (2, 3):
-                j = i + span
+        for m in _ANCHOR_RE.finditer(content):
+            anchor = m.group()
+            body_start = m.start() + len(anchor)
+            # 姓名主体：单字姓 +1~2 字，复合姓 +1~2 字
+            for extra in (1, 2):
+                j = body_start + extra
                 if j > length:
                     continue
-                candidate = content[i:j]
+                candidate = content[m.start():j]
                 if not re.fullmatch(r'[一-鿿]+', candidate):
                     continue
                 if candidate in names or candidate in _COMMON_WORDS:
@@ -226,8 +239,8 @@ class ChapterHardGate:
                     continue
                 freq[candidate] += 1
 
-        suspects = [n for n, f in freq.items() if f >= 2]
-        # 3 字候选名若其前 2 字已构成重复的 2 字名，去重防双计
+        # 放宽：同一候选名须出现 ≥name_min_freq 次才计为可疑，降低世界设定术语误杀
+        suspects = [n for n, f in freq.items() if f >= self.name_min_freq]
         return sorted(set(suspects))
 
     def _suspicious_levels(self, content: str, power_levels: Sequence[str]) -> List[str]:
@@ -257,6 +270,9 @@ _COMMON_WORDS = frozenset({
     "那个", "什么", "怎么", "为什么", "自己", "我们", "你们", "他们", "大家",
     "许多", "如此", "一般", "十分", "突然", "终于", "接着", "立刻", "瞬间",
     "一时", "一直", "一直", "一瞬", "浑身", "心头", "脑中", "心底", "目光",
+    # 常见修炼/世界观术语（避免被姓名启发式误判为臆造人名）
+    "元气", "元力", "愿力", "灵力", "法力", "真气", "修为", "灵石", "灵识",
+    "上品", "中品", "下品", "一品", "二品", "三品", "上面", "上写",
 })
 
 # 常见虚词结尾（作姓名尾字极罕见），用于姓名启发式过滤

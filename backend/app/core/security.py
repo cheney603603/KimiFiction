@@ -5,13 +5,10 @@
 from datetime import datetime, timedelta
 from typing import Optional, Union
 from jose import JWTError, jwt
-from passlib.context import CryptContext
+import bcrypt
 from loguru import logger
 
 from app.core.config import settings
-
-# 密码哈希上下文
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 
 # JWT配置
 ALGORITHM = "HS256"
@@ -19,13 +16,22 @@ ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7天
 
 
 def verify_password(plain_password: str, hashed_password: str) -> bool:
-    """验证密码"""
-    return pwd_context.verify(plain_password, hashed_password)
+    """验证密码（bcrypt 直调，兼容 passlib 生成的 $2b$ 哈希）"""
+    try:
+        return bcrypt.checkpw(
+            plain_password.encode("utf-8")[:72],
+            hashed_password.encode("utf-8"),
+        )
+    except (ValueError, TypeError):
+        return False
 
 
 def get_password_hash(password: str) -> str:
-    """获取密码哈希"""
-    return pwd_context.hash(password)
+    """获取密码哈希（bcrypt 直调）"""
+    return bcrypt.hashpw(
+        password.encode("utf-8")[:72],
+        bcrypt.gensalt(rounds=12),
+    ).decode("utf-8")
 
 
 def create_access_token(

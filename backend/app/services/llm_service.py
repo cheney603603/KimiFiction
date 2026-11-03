@@ -272,13 +272,13 @@ class LLMService:
             raise ValueError("未配置DeepSeek API Key! 请设置DEEPSEEK_API_KEY环境变量")
 
         model = self.model or settings.DEEPSEEK_MODEL
-        timeout = config.get("timeout") or 300
+        timeout = config.get("timeout") or 120
 
         logger.info(f"[LLM] 调用DeepSeek API(流式): model={model}, base_url={base_url}, json_mode={bool(json_mode)}")
         # 对网关限流/过载(429/5xx)做指数退避重试，保证长时间批量生成稳定。
-        # 联影网关过载可能持续数十分钟：LLM_RETRIES 控制次数，LLM_RETRY_BACKOFF_MAX 控制最大单次等待(默认30分钟)。
-        retries = int(os.environ.get("LLM_RETRIES", "24"))
-        backoff_max = int(os.environ.get("LLM_RETRY_BACKOFF_MAX", "1800"))
+        # 收紧默认值以便快速失败（联影网关不稳定时避免一次调用卡数小时）。
+        retries = int(os.environ.get("LLM_RETRIES", "4"))
+        backoff_max = int(os.environ.get("LLM_RETRY_BACKOFF_MAX", "60"))
 
         # P0-2: json_mode 时附加 response_format；网关不支持则探测后降级为 prompt 约束（仅记录，不阻塞）
         global _deepseek_json_mode_supported

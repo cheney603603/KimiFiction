@@ -724,20 +724,22 @@ async def write_chapter(
                             
                             if not content or not content.strip().startswith("["):
                                 existing = await chapter_service.get_chapter_by_number(novel_id, request.chapter_number)
-                                
-                                # 收集读者反馈数据
+
+                                # 收集写作元数据（reader 反馈/循环历史/评审 → 存 generation_params，避免写入 feedbacks 关系表）
                                 reader_feedback = result.data.get("reader_feedback", {})
                                 loop_history = result.data.get("writer_reader_loop_history", [])
                                 editor_review = result.data.get("editor_review", {})
-                                feedbacks_data = {}
+                                writer_meta = {}
                                 if reader_feedback:
-                                    feedbacks_data["reader_feedback"] = reader_feedback
+                                    writer_meta["reader_feedback"] = reader_feedback
                                 if loop_history:
-                                    feedbacks_data["loop_history"] = loop_history
+                                    writer_meta["loop_history"] = loop_history
                                 if editor_review:
-                                    feedbacks_data["editor_review"] = editor_review
-                                feedbacks_json = _json.dumps(feedbacks_data, ensure_ascii=False) if feedbacks_data else None
-                                
+                                    writer_meta["editor_review"] = editor_review
+
+                                from app.models.chapter import Chapter, ChapterStatus
+                                from sqlalchemy import select
+
                                 if existing:
                                     await chapter_service.update_chapter(
                                         existing.id,
@@ -747,15 +749,6 @@ async def write_chapter(
                                             summary=summary,
                                         )
                                     )
-                                    # 单独更新 feedbacks 字段（ChapterUpdate 不含此字段）
-                                    if feedbacks_json:
-                                        from app.models.chapter import Chapter
-                                        from sqlalchemy import select
-                                        stmt = select(Chapter).where(Chapter.id == existing.id)
-                                        chapter_row = (await db.execute(stmt)).scalar_one_or_none()
-                                        if chapter_row:
-                                            chapter_row.feedbacks = feedbacks_json
-                                            await db.commit()
                                     logger.info(f"[write_chapter] 更新章节到数据库: novel_id={novel_id}, chapter={request.chapter_number}")
                                 else:
                                     await chapter_service.create_chapter(
@@ -767,35 +760,29 @@ async def write_chapter(
                                             summary=summary,
                                         )
                                     )
-                                    # 保存 feedbacks
-                                    if feedbacks_json:
-                                        from app.models.chapter import Chapter
-                                        from sqlalchemy import select
-                                        stmt = select(Chapter).where(Chapter.novel_id == novel_id, Chapter.chapter_number == request.chapter_number)
-                                        chapter_row = (await db.execute(stmt)).scalar_one_or_none()
-                                        if chapter_row:
-                                            chapter_row.feedbacks = feedbacks_json
-                                            await db.commit()
                                     logger.info(f"[write_chapter] 创建章节到数据库: novel_id={novel_id}, chapter={request.chapter_number}, words={word_count}")
 
-                                # P0-9: 硬门禁 flagged 状态落库
-                                if result.data.get("flagged"):
-                                    from app.models.chapter import Chapter, ChapterStatus
-                                    stmt = select(Chapter).where(
+                                # 统一落库写作元数据 + 硬门禁 flagged 状态（generation_params）
+                                chapter_row = (await db.execute(
+                                    select(Chapter).where(
                                         Chapter.novel_id == novel_id,
                                         Chapter.chapter_number == request.chapter_number,
                                     )
-                                    chapter_row = (await db.execute(stmt)).scalar_one_or_none()
-                                    if chapter_row:
+                                )).scalar_one_or_none()
+                                if chapter_row:
+                                    gen_params = dict(chapter_row.generation_params or {})
+                                    if writer_meta:
+                                        gen_params["writer_meta"] = writer_meta
+                                    if result.data.get("flagged"):
                                         chapter_row.status = ChapterStatus.FLAGGED
-                                        gp = dict(chapter_row.generation_params or {})
-                                        gp["flagged"] = True
-                                        gp["gate_failures"] = result.data.get("gate_failures", [])
-                                        chapter_row.generation_params = gp
-                                        await db.commit()
+                                        gen_params["flagged"] = True
+                                        gen_params["gate_failures"] = result.data.get("gate_failures", [])
                                         logger.warning(
                                             f"[write_chapter] 章节 {request.chapter_number} 已标记 flagged（硬门禁未通过）"
                                         )
+                                    if gen_params:
+                                        chapter_row.generation_params = gen_params
+                                    await db.commit()
 
                         await tracker.add_log("write_chapter", "章节已自动保存到数据库", "info")
                     except Exception as save_error:

@@ -65,9 +65,9 @@ class Chapter(Base):
         nullable=False, default=True, comment="读者端是否可见"
     )
     
-    # 状态
+    # 状态（按枚举值读写，与 DB enum('draft','review','published','flagged') 对齐）
     status: Mapped[ChapterStatus] = mapped_column(
-        Enum(ChapterStatus),
+        Enum(ChapterStatus, values_callable=lambda e: [m.value for m in e]),
         default=ChapterStatus.DRAFT,
         comment="章节状态"
     )

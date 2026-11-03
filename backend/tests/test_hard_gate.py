@@ -62,17 +62,25 @@ class TestHardGateNames:
     def test_many_suspects_fails(self):
         g = ChapterHardGate(target_words=3000)
         good = "他推开门，寒风灌了进来。" * 250
-        fabricated = "赵日天冷笑一声。赵日天站起身来。王五在一旁看戏。王五连连点头。李四叹了口气。李四别过脸去。"
+        names = ["赵日天", "王五", "李四", "孙七", "周八", "吴九", "郑十", "钱二", "朱三"]
+        fabricated = "".join(f"{n}冷笑一声。{n}站起身来。{n}别过脸去。" for n in names)
         r = g.check(good + fabricated, character_names=["李云", "老管家"])
         assert not r.passed
         assert any(c.rule == "角色名白名单" and not c.passed for c in r.checks)
 
     def test_common_words_not_suspects(self):
         g = ChapterHardGate(target_words=3000)
-        good = "他推开门，寒风灌了进来。明白了吗？结果已经出来了。" * 100 + "他看了一眼窗外，随即低头继续赶路。" * 100
-        r = g.check(good, character_names=["李云"])
-        # "明白""结果" 等常见词不应被误判
+        text = "他推开门，寒风灌了进来。上面写着，元气凝成一线，愿力涌来。明白了吗？结果已经出来了。" * 120
+        r = g.check(text, character_names=["李云"])
+        # "上面""元气""愿力""明白""结果" 等常见词不应被误判
         assert r.passed is True
+
+    def test_compound_surname_detected(self):
+        g = ChapterHardGate(target_words=3000)
+        good = "他推开门，寒风灌了进来。" * 250
+        fabricated = "上官云冷笑一声。上官云站起身来。上官云别过脸去。上官云又笑了。"
+        suspects = g._suspicious_names(good + fabricated, character_names=["李云"])
+        assert "上官云" in suspects
 
 
 class TestStyleProfile:

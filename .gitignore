@@ -79,3 +79,6 @@ lines_*.txt
 # Coverage
 .coverage
 htmlcov/
+
+# Runtime snapshots
+snapshots/
