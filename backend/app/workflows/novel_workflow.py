@@ -290,7 +290,7 @@ async def node_write_chapter(state: NovelGraphState) -> NovelGraphState:
     3. 更新 draft 和 feedback
     """
     _update_status(state, "write_chapter", NodeStatus.RUNNING)
-    from app.writer_reader_rl import WriterReaderLoop
+    from app.writer_reader_loop import WriterReaderLoop
     chapter_num = state.get("current_chapter", 1)
     
     # 获取本章细纲
@@ -303,12 +303,14 @@ async def node_write_chapter(state: NovelGraphState) -> NovelGraphState:
         outline = {"title": f"第{chapter_num}章", "summary": "", "key_events": []}
     
     # 构建完整上下文（融合 RAG + Entity-Aware 结果）
+    from app.services.style_profile import resolve_writing_style
     full_context = dict(state.get("rag_context", {}))
     full_context.update({
         "world_setting": state.get("world_setting", {}),
         "characters": state.get("characters", []),
         "plot_setting": state.get("plot_setting", {}),
-        "writing_style": "叙事流畅，情节紧凑",
+        # P0-10: 文风从小说资产读取，不再硬编码
+        "writing_style": resolve_writing_style(state),
         "env_level": "normal",
         "dialogue_ratio": 0.3,
         "entity_context": state.get("final_context", []),  # 注入融合后的实体上下文

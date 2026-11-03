@@ -127,10 +127,16 @@ class WorkflowState:
 
     # Entity-Aware RAG: 活跃实体列表
     active_entities: List[str] = field(default_factory=list)
-
     # 反馈追踪
     pending_revisions: List[Dict[str, Any]] = field(default_factory=list)  # 待处理修改
     revision_history: List[Dict[str, Any]] = field(default_factory=list)  # 修改历史
+
+    # 写作管线 V2（P1）：近几章类型（反模板化）与风格锚点资产
+    recent_chapter_types: List[str] = field(default_factory=list)
+    style_profile: Dict[str, Any] = field(default_factory=dict)
+
+    # 伏笔台账（P2）：item -> {item, seed_chapter, due_chapter, status}
+    foreshadowing: Dict[str, Any] = field(default_factory=dict)
 
     # 任务队列
     task_queue: List[WorkflowTask] = field(default_factory=list)
@@ -1388,130 +1394,152 @@ class WorkflowEngine:
         chapter_content = ""
         loop_history: List[Dict[str, Any]] = []
 
-        # ── Writer-Reader RL 对抗循环 ──
-        try:
-            from app.writer_reader_rl import WriterReaderLoop
-            rl_loop = WriterReaderLoop(
-                novel_id=self.novel_id,
-                chapter_number=chapter_number,
-                max_rounds=writer_reader_max_rounds,
-                score_threshold=reader_score_threshold,
+        # ── 写作管线 V2（P1）：分场景生成（默认关闭，§9 回滚策略）──
+        _skip_hard_gate = False
+        if settings.WRITING_PIPELINE_V2:
+            v2_result = await self._write_chapter_v2(
+                chapter_number, outline, chapter_input, writing_params or {}
             )
-            
-            # 构建完整上下文
-            full_context = {
-                "world_setting": self.state.world_setting,
-                "characters": self.state.characters,
-                "plot_setting": self.state.plot_setting,
-                "writing_style": (writing_params or {}).get("writing_style", "叙事流畅，情节紧凑"),
-                "env_level": (writing_params or {}).get("env_level", "normal"),
-                "dialogue_ratio": (writing_params or {}).get("dialogue_ratio", 0.3),
-            }
-            
-            rl_result = await rl_loop.run(
-                outline=outline,
-                characters=self.state.characters,
-                context=full_context,
-                initial_draft="",
-            )
-            
-            result = TaskResult(
-                success=rl_result.get("success", False),
-                phase=WorkflowPhase.CHAPTER_WRITING.value,
-                data={
-                    "content": rl_result.get("final_draft", ""),
-                    "word_count": rl_result.get("word_count", 0),
-                    "reader_feedback": rl_result.get("loop_history", [{}])[-1].get("reader_feedback", {}),
-                    "writer_reader_loop_history": rl_result.get("loop_history", []),
-                    "learning_report": rl_loop.get_learning_report(),
-                    "chapter_reward": rl_result.get("final_reward", 0),
-                },
-            )
-            loop_history = rl_result.get("loop_history", [])
-            chapter_content = result.data.get("content", "")
-            reader_result = {
-                "success": True,
-                "reader_feedback": result.data.get("reader_feedback", {}),
-            }
-            
-        except Exception as e:
-            logger.warning(f"[write_chapter] Writer-Reader RL循环失败，降级为原逻辑: {e}")
-            # 降级：使用原有的单轮写作逻辑
-            for loop_round in range(1, writer_reader_max_rounds + 1):
-                loop_input = {
-                    **chapter_input,
-                    "loop_round": loop_round,
-                    "rewrite_round": loop_round,
-                }
-                if chapter_content:
-                    loop_input["previous_draft"] = chapter_content
-                if reader_result.get("reader_feedback"):
-                    loop_input["reader_feedback"] = reader_result["reader_feedback"]
-
-                log_agent_workflow(
-                    "writer",
-                    "writer_reader_loop_start",
-                    context=loop_input,
-                    details={"loop_round": loop_round},
-                )
-                result = await self.run_phase(WorkflowPhase.CHAPTER_WRITING, loop_input)
-                if not result.success:
-                    return result
-
+            if v2_result is not None and v2_result.success:
+                result = v2_result
                 chapter_content = result.data.get("content", "")
-                if reader_agent and chapter_content:
-                    reader_input = {
-                        "workflow_id": self.state.workflow_id,
-                        "novel_id": self.novel_id,
-                        "phase": WorkflowPhase.CHAPTER_WRITING.value,
-                        "loop_round": loop_round,
-                        "chapter_number": chapter_number,
-                        "chapter_content": chapter_content,
-                        "outline": outline,
-                        "characters": self.state.characters,
-                        "world_setting": self.state.world_setting,
-                        "plot_setting": self.state.plot_setting,
-                    }
-                    reader_result = await reader_agent.process(reader_input)
-                else:
-                    reader_result = {}
+                reader_result = {"success": True, "reader_feedback": result.data.get("reader_feedback", {})}
+                loop_history = []
+                _skip_hard_gate = True
+                logger.info(f"[write_chapter] V2 管线完成(第{chapter_number}章): {len(chapter_content)} 字")
+            else:
+                logger.warning("[write_chapter] V2 管线失败，降级为传统对抗循环")
 
-                feedback = reader_result.get("reader_feedback", {})
-                reader_score = float(feedback.get("reader_score", 0) or 0)
-                hook_score = float(feedback.get("hook_score", 0) or 0)
-                continue_reading = bool(feedback.get("would_continue_reading", False))
-                passed = (
-                    reader_result.get("success", False)
-                    and reader_score >= reader_score_threshold
-                    and hook_score >= hook_score_threshold
-                    and continue_reading
+        # ── Writer-Reader 对抗循环（非 V2 路径）──
+        if result is None:
+            try:
+                from app.writer_reader_loop import WriterReaderLoop
+                rl_loop = WriterReaderLoop(
+                    novel_id=self.novel_id,
+                    chapter_number=chapter_number,
+                    max_rounds=writer_reader_max_rounds,
+                    score_threshold=reader_score_threshold,
                 )
-                loop_history.append({
-                    "loop_round": loop_round,
-                    "reader_score": reader_score,
-                    "hook_score": hook_score,
-                    "would_continue_reading": continue_reading,
-                    "passed": passed,
-                })
-                log_agent_workflow(
-                    "reader",
-                    "writer_reader_loop_feedback",
-                    context={
-                        "workflow_id": self.state.workflow_id,
-                        "novel_id": self.novel_id,
-                        "chapter_number": chapter_number,
-                        "phase": WorkflowPhase.CHAPTER_WRITING.value,
-                        "loop_round": loop_round,
+                
+                # 构建完整上下文
+                from app.services.style_profile import resolve_writing_style
+                full_context = {
+                    "world_setting": self.state.world_setting,
+                    "characters": self.state.characters,
+                    "plot_setting": self.state.plot_setting,
+                    # P0-10: 文风从小说资产读取（接口覆盖优先）
+                    "writing_style": resolve_writing_style(
+                        self.state.__dict__ if hasattr(self.state, "__dict__") else None,
+                        user_override=(writing_params or {}).get("writing_style"),
+                    ),
+                    "env_level": (writing_params or {}).get("env_level", "normal"),
+                    "dialogue_ratio": (writing_params or {}).get("dialogue_ratio", 0.3),
+                }
+                
+                rl_result = await rl_loop.run(
+                    outline=outline,
+                    characters=self.state.characters,
+                    context=full_context,
+                    initial_draft="",
+                )
+                
+                result = TaskResult(
+                    success=rl_result.get("success", False),
+                    phase=WorkflowPhase.CHAPTER_WRITING.value,
+                    data={
+                        "content": rl_result.get("final_draft", ""),
+                        "word_count": rl_result.get("word_count", 0),
+                        "reader_feedback": rl_result.get("loop_history", [{}])[-1].get("reader_feedback", {}),
+                        "writer_reader_loop_history": rl_result.get("loop_history", []),
+                        "learning_report": rl_loop.get_learning_report(),
+                        "chapter_reward": rl_result.get("final_reward", 0),
                     },
-                    details=loop_history[-1],
                 )
-                result.data["reader_feedback"] = feedback
-                result.data["reader_agent_success"] = reader_result.get("success", False)
-                result.data["writer_reader_loop_history"] = loop_history
-
-                if passed:
-                    break
-
+                loop_history = rl_result.get("loop_history", [])
+                chapter_content = result.data.get("content", "")
+                reader_result = {
+                    "success": True,
+                    "reader_feedback": result.data.get("reader_feedback", {}),
+                }
+                
+            except Exception as e:
+                logger.warning(f"[write_chapter] Writer-Reader RL循环失败，降级为原逻辑: {e}")
+                # 降级：使用原有的单轮写作逻辑
+                for loop_round in range(1, writer_reader_max_rounds + 1):
+                    loop_input = {
+                        **chapter_input,
+                        "loop_round": loop_round,
+                        "rewrite_round": loop_round,
+                    }
+                    if chapter_content:
+                        loop_input["previous_draft"] = chapter_content
+                    if reader_result.get("reader_feedback"):
+                        loop_input["reader_feedback"] = reader_result["reader_feedback"]
+    
+                    log_agent_workflow(
+                        "writer",
+                        "writer_reader_loop_start",
+                        context=loop_input,
+                        details={"loop_round": loop_round},
+                    )
+                    result = await self.run_phase(WorkflowPhase.CHAPTER_WRITING, loop_input)
+                    if not result.success:
+                        return result
+    
+                    chapter_content = result.data.get("content", "")
+                    if reader_agent and chapter_content:
+                        reader_input = {
+                            "workflow_id": self.state.workflow_id,
+                            "novel_id": self.novel_id,
+                            "phase": WorkflowPhase.CHAPTER_WRITING.value,
+                            "loop_round": loop_round,
+                            "chapter_number": chapter_number,
+                            "chapter_content": chapter_content,
+                            "outline": outline,
+                            "characters": self.state.characters,
+                            "world_setting": self.state.world_setting,
+                            "plot_setting": self.state.plot_setting,
+                        }
+                        reader_result = await reader_agent.process(reader_input)
+                    else:
+                        reader_result = {}
+    
+                    feedback = reader_result.get("reader_feedback", {})
+                    reader_score = float(feedback.get("reader_score", 0) or 0)
+                    hook_score = float(feedback.get("hook_score", 0) or 0)
+                    continue_reading = bool(feedback.get("would_continue_reading", False))
+                    passed = (
+                        reader_result.get("success", False)
+                        and reader_score >= reader_score_threshold
+                        and hook_score >= hook_score_threshold
+                        and continue_reading
+                    )
+                    loop_history.append({
+                        "loop_round": loop_round,
+                        "reader_score": reader_score,
+                        "hook_score": hook_score,
+                        "would_continue_reading": continue_reading,
+                        "passed": passed,
+                    })
+                    log_agent_workflow(
+                        "reader",
+                        "writer_reader_loop_feedback",
+                        context={
+                            "workflow_id": self.state.workflow_id,
+                            "novel_id": self.novel_id,
+                            "chapter_number": chapter_number,
+                            "phase": WorkflowPhase.CHAPTER_WRITING.value,
+                            "loop_round": loop_round,
+                        },
+                        details=loop_history[-1],
+                    )
+                    result.data["reader_feedback"] = feedback
+                    result.data["reader_agent_success"] = reader_result.get("success", False)
+                    result.data["writer_reader_loop_history"] = loop_history
+    
+                    if passed:
+                        break
+    
         if result and result.success:
             if reviewer_agent and chapter_content:
                 review_result = await reviewer_agent.process({
@@ -1527,6 +1555,119 @@ class WorkflowEngine:
                     "reader_feedback": reader_result.get("reader_feedback", {}),
                 })
                 result.data["editor_review"] = review_result
+
+            # ── P0-9: 硬门禁（确定性规则，§5.2）──
+            # 未通过 → 定向重写 ≤1 次；仍不过 → 标记 flagged 待人工。
+            # （V2 管线内部已执行硬门禁，此处跳过避免重复）
+            if chapter_content and not _skip_hard_gate:
+                try:
+                    from app.services.hard_gate import ChapterHardGate
+                    from app.agents.writer import ChapterWriterAgent
+
+                    target = int((writing_params or {}).get(
+                        "target_words", outline.get("word_count_target", 3000)
+                    ) or 3000)
+                    char_names = [c.get("name") for c in (self.state.characters or []) if c.get("name")]
+                    power_levels = []
+                    ws = self.state.world_setting or {}
+                    for ps in (ws.get("power_systems") or []):
+                        if isinstance(ps, dict):
+                            for key in ("levels", "ranks", "stages", "realms"):
+                                vals = ps.get(key)
+                                if isinstance(vals, list):
+                                    for v in vals:
+                                        if isinstance(v, str) and v:
+                                            power_levels.append(v)
+                                        elif isinstance(v, dict):
+                                            nm = v.get("name") or v.get("level") or v.get("realm")
+                                            if nm:
+                                                power_levels.append(nm)
+                            nm = ps.get("name")
+                            if nm and nm not in power_levels:
+                                power_levels.append(nm)
+
+                    # P2: 伏笔台账（硬门禁规则6）——从剧情设定批量埋设，计算超期项
+                    from app.services.foreshadowing_ledger import ForeshadowingLedger, merge_ledgers
+                    seeded_ledger = ForeshadowingLedger.seed_from_plot(
+                        self.state.plot_setting or {}, chapter_number
+                    )
+                    if seeded_ledger:
+                        self.state.foreshadowing = merge_ledgers(
+                            self.state.foreshadowing or {},
+                            {rec["item"]: rec for rec in seeded_ledger},
+                        )
+                    overdue_foreshadowing = ForeshadowingLedger(
+                        self.state.foreshadowing or {}
+                    ).overdue_items(chapter_number)
+
+                    gate = ChapterHardGate(target_words=target)
+                    gate_result = gate.check(
+                        chapter_content,
+                        character_names=char_names,
+                        power_levels=power_levels,
+                        overdue_foreshadowing=overdue_foreshadowing,
+                    )
+                    result.data["hard_gate"] = {
+                        "passed": gate_result.passed,
+                        "checks": [c.__dict__ for c in gate_result.checks],
+                        "failures": [c.__dict__ for c in gate_result.failures],
+                        "word_count": gate_result.word_count,
+                        "rewritten": False,
+                    }
+
+                    if not gate_result.passed:
+                        logger.warning(
+                            f"[write_chapter] 硬门禁未通过(第{chapter_number}章): {gate_result.failure_summary()}"
+                        )
+                        # P2: 成本熔断——调用预算不足时跳过定向重写，直接标记
+                        from app.services.cost_breaker import CostBreaker
+                        breaker = CostBreaker.from_params(writing_params or {})
+                        if breaker.should_rewrite(breaker.estimate_used_calls(loop_history)):
+                            rewrite_agent = ChapterWriterAgent(novel_id=self.novel_id)
+                            rewrite_input = {
+                                **chapter_input,
+                                "previous_draft": chapter_content,
+                                "reader_feedback": reader_result.get("reader_feedback", {}),
+                                "notes": "硬门禁未通过，请针对以下问题定向修订并保留原稿精华：\n"
+                                        + gate_result.failure_summary(),
+                            }
+                            rewrite = await rewrite_agent.process(rewrite_input)
+                            rewrite_ok = rewrite.get("success") and rewrite.get("content")
+                        else:
+                            rewrite = None
+                            rewrite_ok = False
+                        if rewrite_ok:
+                            new_content = rewrite["content"].strip()
+                            gate2 = ChapterHardGate(target_words=target)
+                            gate2_result = gate2.check(
+                                new_content,
+                                character_names=char_names,
+                                power_levels=power_levels,
+                                overdue_foreshadowing=overdue_foreshadowing,
+                            )
+                            result.data["hard_gate"]["rewritten"] = True
+                            result.data["hard_gate"]["rewrite_passed"] = gate2_result.passed
+                            if gate2_result.passed:
+                                chapter_content = new_content
+                                result.data["content"] = new_content
+                                result.data["word_count"] = gate2_result.word_count
+                                logger.info(f"[write_chapter] 硬门禁重写通过(第{chapter_number}章)")
+                            else:
+                                result.data["flagged"] = True
+                                result.data["gate_failures"] = [c["rule"] for c in result.data["hard_gate"]["failures"]]
+                                result.data["hard_gate"]["flagged"] = True
+                                logger.warning(
+                                    f"[write_chapter] 硬门禁重写仍不过(第{chapter_number}章)，标记 flagged 待人工"
+                                )
+                        else:
+                            result.data["flagged"] = True
+                            result.data["gate_failures"] = [c["rule"] for c in result.data["hard_gate"]["failures"]]
+                            result.data["hard_gate"]["flagged"] = True
+                            logger.error(
+                                f"[write_chapter] 硬门禁定向重写失败: {rewrite.get('error') if rewrite else '无结果'}"
+                            )
+                except Exception as gate_err:
+                    logger.warning(f"[write_chapter] 硬门禁执行失败（非阻塞）: {gate_err}")
 
             if chapter_content and settings.RUN_POST_WRITE_RUBRIC:
                 try:
@@ -1617,6 +1758,127 @@ class WorkflowEngine:
             await self.save_state()
 
         return result
+
+    # ── 写作管线 V2（P1） ─────────────────────────
+
+    def _extract_power_levels(self, world_setting: Optional[Dict[str, Any]]) -> List[str]:
+        """从世界观设定提取力量等级白名单（硬门禁规则5）。"""
+        levels: List[str] = []
+        ws = world_setting or {}
+        for ps in (ws.get("power_systems") or []):
+            if not isinstance(ps, dict):
+                continue
+            for key in ("levels", "ranks", "stages", "realms"):
+                vals = ps.get(key)
+                if isinstance(vals, list):
+                    for v in vals:
+                        if isinstance(v, str) and v:
+                            levels.append(v)
+                        elif isinstance(v, dict):
+                            nm = v.get("name") or v.get("level") or v.get("realm")
+                            if nm:
+                                levels.append(nm)
+            nm = ps.get("name")
+            if nm and nm not in levels:
+                levels.append(nm)
+        return levels
+
+    def _load_style_samples(self) -> List[str]:
+        """从小说资产读取风格锚点样本（§5.1①）；无样本时降级为空（不虚构）。"""
+        samples = []
+        profile = getattr(self.state, "style_profile", None) or {}
+        if isinstance(profile, dict):
+            raw = profile.get("samples") or profile.get("sample_paragraphs")
+            if isinstance(raw, list):
+                samples = [str(s) for s in raw if s and str(s).strip()]
+        return samples
+
+    async def _write_chapter_v2(
+        self,
+        chapter_number: int,
+        outline: Dict[str, Any],
+        chapter_input: Dict[str, Any],
+        writing_params: Dict[str, Any],
+    ) -> Optional[TaskResult]:
+        """P1 分场景写作管线（场景规划→逐场景生成→缝合→硬门禁→盲评→诊断）。"""
+        from app.services.scene_pipeline import ScenePipeline, ChapterTypePool
+
+        recent = list(getattr(self.state, "recent_chapter_types", []) or [])
+        chapter_type = ChapterTypePool.pick(recent)
+        target_words = int(outline.get("word_count_target", 3000) or 3000)
+
+        # 近 5 章开头（宏观诊断·章间同构）
+        prev_openings: List[str] = []
+        try:
+            from app.core.database import get_session
+            from app.models.chapter import Chapter
+            from sqlalchemy import select
+            async with get_session() as db:
+                rows = (await db.execute(
+                    select(Chapter)
+                    .where(Chapter.novel_id == self.novel_id)
+                    .order_by(Chapter.chapter_number.desc())
+                    .limit(5)
+                )).scalars().all()
+                prev_openings = [(c.content or "")[:200] for c in rows if c.chapter_number != chapter_number]
+        except Exception as e:
+            logger.warning(f"[write_chapter_v2] 近几章开头读取失败: {e}")
+
+        built_ctx = chapter_input.get("context", {}) or {}
+        # P2: 伏笔台账埋设 + 超期计算
+        from app.services.foreshadowing_ledger import ForeshadowingLedger, merge_ledgers
+        seeded_ledger = ForeshadowingLedger.seed_from_plot(self.state.plot_setting or {}, chapter_number)
+        if seeded_ledger:
+            self.state.foreshadowing = merge_ledgers(
+                self.state.foreshadowing or {},
+                {rec["item"]: rec for rec in seeded_ledger},
+            )
+        overdue_foreshadowing = ForeshadowingLedger(self.state.foreshadowing or {}).overdue_items(chapter_number)
+
+        pipe_ctx = {
+            "world_setting": self.state.world_setting or {},
+            "plot_setting": self.state.plot_setting or {},
+            "previous_chapter_summary": built_ctx.get("previous_chapter_summary", ""),
+            "ongoing_plots": built_ctx.get("ongoing_plots", []),
+            "prev_openings": prev_openings,
+            "power_levels": self._extract_power_levels(self.state.world_setting),
+            "overdue_foreshadowing": overdue_foreshadowing,
+            "loop_history": [],
+        }
+
+        pipe = ScenePipeline(
+            novel_id=self.novel_id,
+            chapter_number=chapter_number,
+            target_words=target_words,
+            chapter_type=chapter_type,
+            style_samples=self._load_style_samples(),
+        )
+        r = await pipe.run(outline, self.state.characters or [], pipe_ctx)
+
+        self.state.recent_chapter_types = recent + [chapter_type]
+        try:
+            await self.save_state()
+        except Exception as e:
+            logger.warning(f"[write_chapter_v2] 章节类型状态保存失败: {e}")
+
+        return TaskResult(
+            success=True,
+            phase=WorkflowPhase.CHAPTER_WRITING.value,
+            data={
+                "content": r.get("final_draft", ""),
+                "word_count": r.get("word_count", 0),
+                "reader_feedback": {},
+                "writer_reader_loop_history": [],
+                "chapter_type": chapter_type,
+                "scene_info": r.get("scenes", []),
+                "blind_review": r.get("blind_review"),
+                "diagnostics": r.get("diagnostics"),
+                "hard_gate": r.get("hard_gate"),
+                "flagged": r.get("flagged", False),
+                "gate_failures": r.get("gate_failures", []),
+                "pipeline_v2": True,
+            },
+        )
 
     async def revise_chapter(
         self,

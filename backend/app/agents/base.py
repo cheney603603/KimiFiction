@@ -10,6 +10,7 @@ from loguru import logger
 from app.core.config import settings
 from app.core.llm_config_manager import LLMConfigManager
 from app.services.llm_service import LLMService, LLMProvider, get_llm_service
+from app.services.llm_service_tracked import TrackedLLMService
 from app.core.json_utils import extract_json_from_response
 from app.core.agent_logging import log_agent_dialogue, log_agent_trace, log_agent_workflow
 
@@ -80,13 +81,13 @@ class BaseAgent(ABC):
     ) -> str:
         """
         调用LLM
-        
+
         Args:
             prompt: 用户提示词
-            temperature: 可选的温度覆盖（仅OpenAI模式有效）
+            temperature: 可选的温度覆盖（P0-3：对所有 provider 生效，不再仅限 OpenAI）
             json_mode: 是否要求JSON输出
             **kwargs: 额外参数（如enable_web_search等）
-            
+
         Returns:
             LLM的响应文本
         """
@@ -95,19 +96,10 @@ class BaseAgent(ABC):
             {"role": "system", "content": self.system_prompt},
             {"role": "user", "content": prompt}
         ]
-        
+
         try:
-            # 如果指定了温度且是OpenAI模式，创建临时实例
-            if temperature is not None and self.llm_service.provider == LLMProvider.OPENAI:
-                temp_service = LLMService(
-                    provider=self.llm_service.provider,
-                    model=self.llm_service.model,
-                    temperature=temperature,
-                    max_tokens=self.llm_service.max_tokens,
-                )
-                result = await temp_service.chat(messages, json_mode=json_mode, **kwargs)
-            else:
-                result = await self.llm_service.chat(messages, json_mode=json_mode, **kwargs)
+            svc = self._service_with_overrides(temperature=temperature)
+            result = await svc.chat(messages, json_mode=json_mode, **kwargs)
 
             log_agent_dialogue(
                 self.name,
@@ -125,6 +117,74 @@ class BaseAgent(ABC):
         except Exception as e:
             logger.error(f"{self.name} LLM调用失败: {e}")
             raise
+
+    def _service_with_overrides(
+        self,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+    ) -> LLMService:
+        """构造带温度/长度覆盖的服务实例，保留追踪上下文（P0-3/P0-4）。"""
+        svc = self.llm_service
+        if temperature is None and max_tokens is None:
+            return svc
+        cls = type(svc)
+        if cls is LLMService:
+            return LLMService(
+                provider=svc.provider,
+                model=svc.model,
+                temperature=temperature if temperature is not None else svc.temperature,
+                max_tokens=max_tokens if max_tokens is not None else svc.max_tokens,
+                chat2api_base_url=getattr(svc, "chat2api_base_url", None),
+            )
+        if isinstance(svc, TrackedLLMService):
+            temp = TrackedLLMService(
+                provider=svc.provider,
+                model=svc.model,
+                temperature=temperature if temperature is not None else svc.temperature,
+                max_tokens=max_tokens if max_tokens is not None else svc.max_tokens,
+                chat2api_base_url=getattr(svc, "chat2api_base_url", None),
+                novel_id=svc.novel_id,
+                agent_name=svc.agent_name,
+                auto_track=svc.auto_track,
+            )
+            return temp
+        return svc
+
+    async def call_llm_text(
+        self,
+        prompt: str,
+        temperature: Optional[float] = None,
+        max_tokens: Optional[int] = None,
+        json_mode: bool = False,
+        system_prompt: Optional[str] = None,
+        **kwargs
+    ) -> str:
+        """
+        单轮纯文本调用，不经 ReAct 信封（P0-4）。
+
+        用于章节正文等"最终产物"输出：正文直接生成，避免 JSON 骨架污染正文、
+        thought 占用输出预算、模型在结构化语境下句长趋同。
+        """
+        log_context = kwargs.pop("log_context", None)
+        messages = [
+            {"role": "system", "content": system_prompt or self.system_prompt},
+            {"role": "user", "content": prompt},
+        ]
+        svc = self._service_with_overrides(temperature=temperature, max_tokens=max_tokens)
+        result = await svc.chat(messages, json_mode=json_mode, **kwargs)
+        log_agent_dialogue(
+            self.name,
+            prompt=prompt,
+            response=result,
+            context=log_context,
+            metadata={
+                "temperature": temperature,
+                "max_tokens": max_tokens,
+                "mode": "plain_text",
+            },
+        )
+        logger.debug(f"{self.name} 纯文本LLM响应: {result[:200]}...")
+        return result
 
     async def _call_llm(
         self,

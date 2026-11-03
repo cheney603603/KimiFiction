@@ -3,9 +3,14 @@
 用法:
   python scripts/run_novel_pipeline.py design --title "修真大佬重返都市" --genre "都市修真" --idea "<初始创意>"
   python scripts/run_novel_pipeline.py chapters --novel <id> --from 1 --count 5
+  python scripts/run_novel_pipeline.py full --title "..." --genre "..." --idea "..." --until 100 [--watch] [--webhook URL]
   python scripts/run_novel_pipeline.py status --novel <id>
+
+full: 设计阶段 → 批量写章节 一键贯通；已存在小说时自动续写未写章节。
+      --watch 失败自动重试直到写满；--webhook URL 完成后 POST 通知。
 """
 import sys
+import os
 import json
 import time
 import urllib.request
@@ -289,12 +294,115 @@ def cmd_status(argv):
     print(json.dumps(prog, ensure_ascii=False, indent=2))
 
 
+def _notify(webhook, payload):
+    if not webhook:
+        return
+    try:
+        req = urllib.request.Request(webhook, method="POST")
+        req.add_header("Content-Type", "application/json")
+        with urllib.request.urlopen(req, json.dumps(payload, ensure_ascii=False).encode("utf-8"), timeout=15) as r:
+            print("   [通知] webhook:", r.status)
+    except Exception as e:
+        print(f"   [通知] webhook 发送失败: {e}")
+
+
+def cmd_full(argv):
+    """设计阶段 → 批量写章节 一键贯通（P2 pipeline 原生化）。
+
+    已存在小说（--novel 或 logs/novel_meta.json）时自动续写未写章节；
+    --watch 失败自动重试直到写满；--webhook URL 完成后 POST 通知。
+    """
+    sargs = sys.argv
+    novel_id = None
+    from_n = None
+    until = None
+    count = 5
+    watch = "--watch" in sargs
+    webhook = None
+    if "--webhook" in sargs:
+        webhook = sargs[sargs.index("--webhook") + 1]
+    if "--novel" in sargs:
+        novel_id = int(sargs[sargs.index("--novel") + 1])
+    if "--from" in sargs:
+        from_n = int(sargs[sargs.index("--from") + 1])
+    if "--until" in sargs:
+        until = int(sargs[sargs.index("--until") + 1])
+    if "--count" in sargs:
+        count = int(sargs[sargs.index("--count") + 1])
+
+    token = login()
+
+    # 1. 确定 novel_id（已有小说则续跑，否则先跑设计阶段）
+    if novel_id is None and os.path.exists("logs/novel_meta.json"):
+        meta = json.load(open("logs/novel_meta.json", encoding="utf-8"))
+        novel_id = meta.get("novel_id")
+    if novel_id is None:
+        print("\n>>> 无已有小说，先执行设计阶段（6 阶段）")
+        cmd_design(sargs)
+        meta = json.load(open("logs/novel_meta.json", encoding="utf-8"))
+        novel_id = meta["novel_id"]
+    else:
+        os.makedirs("logs", exist_ok=True)
+        with open("logs/novel_meta.json", "w", encoding="utf-8") as f:
+            json.dump({"novel_id": novel_id, "title": "续跑"}, f, ensure_ascii=False, indent=2)
+    print(f">>> novel_id = {novel_id}")
+
+    # 2. 确定起始章节（未指定则从已写章节的下一个续写）
+    if from_n is None:
+        try:
+            chapters = api("GET", f"/chapters/novel/{novel_id}", token=token)
+            items = chapters.get("items", []) if isinstance(chapters, dict) else []
+            nums = [int(c.get("chapter_number", 0)) for c in items if isinstance(c, dict)]
+            from_n = (max(nums) + 1) if nums else 1
+            print(f">>> 已写 {len(nums)} 章，从第 {from_n} 章续写")
+        except Exception as e:
+            print(f"    (查询已写章节失败，从第 1 章开始: {e})")
+            from_n = 1
+    end = until if until is not None else from_n + count - 1
+    print(f">>> 目标：第 {from_n} ~ {end} 章，watch={watch}")
+
+    # 3. 批量写章节（失败重试；watch 模式持续到写满）
+    n = from_n
+    failed = 0
+    written = 0
+    while n <= end:
+        ok = write_chapter(token, novel_id, n)
+        if ok:
+            failed = 0
+            written += 1
+            n += 1
+            if n % 5 == 0 or n > end:
+                print(f"   >>> 进度: 已完成 {n - from_n}/{end - from_n + 1} 章")
+        else:
+            failed += 1
+            print(f"   [失败] 第{n}章，连续失败 {failed} 次")
+            if failed >= 3:
+                print("   连续失败过多，休息 600s 缓解网关压力...")
+                time.sleep(600)
+                failed = 0
+            if not watch and failed >= 2:
+                print("   （非 watch 模式，暂停。可加 --watch 自动续跑）")
+                break
+            time.sleep(90)
+
+    summary = {
+        "novel_id": novel_id,
+        "requested": (from_n, end),
+        "written": written,
+        "status": "completed" if n > end else "paused",
+    }
+    print("\n>>> 完成摘要:", json.dumps(summary, ensure_ascii=False, indent=2))
+    _notify(webhook, summary)
+
+
 if __name__ == "__main__":
     cmd = sys.argv[1] if len(sys.argv) > 1 else "design"
     if cmd == "design":
         cmd_design(sys.argv)
     elif cmd == "chapters":
         cmd_chapters(sys.argv)
+    elif cmd == "full":
+        cmd_full(sys.argv)
     elif cmd == "status":
         cmd_status(sys.argv)
     else:

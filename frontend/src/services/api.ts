@@ -2,12 +2,6 @@ import axios, { type AxiosInstance, type AxiosRequestConfig } from 'axios'
 import type {
   WorkflowStatus,
   WorkflowGraphProgress,
-  TrainingBatch,
-  TrainingReport,
-  TrainingEpisode,
-  TrainingStatus,
-  RubricEvaluation,
-  StartTrainingRequest,
 } from '../types'
 
 type ApiInstance = Omit<AxiosInstance, 'get' | 'post' | 'put' | 'delete' | 'patch'> & {
@@ -500,85 +494,8 @@ export const evaluationApi = {
 }
 
 // ─────────────────────────────────────────────────────────────
-// RL训练相关API
-// ─────────────────────────────────────────────────────────────
-export const trainingApi = {
-  // 批次管理
-  listBatches: (params?: { novel_id?: number; status?: string; limit?: number }) =>
-    api.get<TrainingBatch[]>('/training/batches', { params }),
-
-  getBatchReport: (batchId: number) =>
-    api.get<TrainingReport>(`/training/batch/${batchId}/report`),
-
-  getBatchEpisodes: (batchId: number, params?: { chapter_number?: number; limit?: number }) =>
-    api.get<TrainingEpisode[]>(`/training/batch/${batchId}/episodes`, { params }),
-
-  getTrainingStatus: () =>
-    api.get<TrainingStatus>('/training/status'),
-
-  // Rubric评测
-  listEvaluations: (params: { novel_id: number; eval_type?: string; chapter_number?: number; limit?: number }) =>
-    api.get<RubricEvaluation[]>('/training/evaluations', { params }),
-
-  getEvaluation: (evaluationId: number) =>
-    api.get<RubricEvaluation>(`/training/evaluation/${evaluationId}`),
-
-  // 训练控制
-  startTraining: (data: StartTrainingRequest) =>
-    api.post('/training/start', data),
-}
-
-// ─────────────────────────────────────────────────────────────
-// Pipeline API（完整训练流程）
-// ─────────────────────────────────────────────────────────────
-export const pipelineApi = {
-  // 启动Pipeline（异步）
-  start: (data: {
-    novel_id: number
-    project_path?: string
-    run_imitation?: boolean
-    run_lora?: boolean
-    run_grpo?: boolean
-    num_imitation_samples?: number
-    lora_epochs?: number
-    grpo_iterations?: number
-    test_prompts?: string[]
-  }) => api.post('/training-pipeline/start', data),
-
-  // 获取Pipeline状态
-  getStatus: (pipelineId: string) =>
-    api.get(`/training-pipeline/status/${pipelineId}`),
-
-  // 获取Pipeline结果
-  getResult: (pipelineId: string) =>
-    api.get(`/training-pipeline/result/${pipelineId}`),
-
-  // 获取对比详情
-  getComparisonDetail: (pipelineId: string, testCase?: number) =>
-    api.get(`/training-pipeline/comparison/${pipelineId}`, { params: testCase !== undefined ? { test_case: testCase } : {} }),
-
-  // 同步运行Pipeline（小规模测试）
-  runSync: (data: {
-    novel_id: number
-    project_path?: string
-    run_imitation?: boolean
-    run_lora?: boolean
-    run_grpo?: boolean
-    num_imitation_samples?: number
-    lora_epochs?: number
-    grpo_iterations?: number
-  }) => api.post('/training-pipeline/run-sync', data),
-
-  // 列出所有Pipeline
-  list: () =>
-    api.get('/training-pipeline/list'),
-
-  // 删除Pipeline记录
-  delete: (pipelineId: string) =>
-    api.delete(`/training-pipeline/${pipelineId}`),
-}
-
 // 评分优化分析API
+// ─────────────────────────────────────────────────────────────
 export const evaluationOptimizerApi = {
   // 列出参考小说
   listReferenceNovels: () =>

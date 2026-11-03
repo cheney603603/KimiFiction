@@ -289,18 +289,17 @@ class ChapterWriterAgent(BaseAgent):
 用户任务：
 {user_message}
 
-当前是第{rewrite_round}轮写作。
+请直接输出章节正文。"""
 
-请以 ReAct 方式先规划和自检，再给出最终章节正文。"""
-
-            react_result = await self.run_react_loop(
+            # P0-4/5: 正文走单轮纯文本调用，不经 ReAct 信封——
+            # 避免 JSON 骨架污染正文、thought 占用输出预算、结构化语境导致句长趋同。
+            content = await self.call_llm_text(
                 task_prompt,
-                context=context,
                 temperature=0.7,
-                output_format="text",
+                max_tokens=8192,
+                log_context=context,
             )
-            content = react_result["final_text"] or react_result["raw_response"]
-            
+
             # 清理返回内容（可能包含markdown代码块）
             content = content.strip()
             if content.startswith("```"):
@@ -323,7 +322,6 @@ class ChapterWriterAgent(BaseAgent):
                 "word_count": word_count,
                 "outline_summary": outline_content[:200] if outline_content else None,
                 "rewrite_round": rewrite_round,
-                "_react_trace": react_result["trace"],
             }
             
         except Exception as e:

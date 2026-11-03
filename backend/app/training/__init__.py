@@ -1,79 +1,36 @@
 """
-训练模块 - 包含 RL 训练、LoRA 微调、模仿学习等功能
-=====================================================
+训练数据工具模块（RL 算法已移除）
+==================================
 
-快速开始：
-    from app.training import GRPOTrainer, LoRATrainer, ImitationLearning
+保留非 RL 的质量度量与数据侧工具（NOVEL_QUALITY_UPGRADE_PLAN §6.2）：
+- LLMJudge        : LLM-as-Judge 盲评工具，供异构评审使用
+- DataQualityAuditor : 训练数据质量审计
 
-硬件优化配置：
-    from app.training.hardware_config import RTX4070Config, get_recommended_config
-    config = RTX4070Config()
-    config.summary()  # 打印显存占用估算
-
-完整训练 Pipeline：
-    from app.training import TrainingPipeline
-    result = await TrainingPipeline(novel_id=1, project_path="output")
-        .run_full_pipeline(run_grpo=True, run_lora=True)
+已移除：GRPO/TPO/模仿学习/LoRA/训练编排/硬件配置（§6.1）
 """
 
-from app.training.grpo_trainer import (
-    GRPOTrainer,
-    GRPOConfig,
-    GRPOPolicy,
-    RewardFunction,
-    GroupRewardNormalizer,
-    WritingAction,
-    Episode,
+from app.training.llm_judge import (
+    LLMJudge,
+    JudgeDimension,
+    DimensionScore,
+    JudgeVerdict,
+    ComparisonResult,
 )
-from app.training.lora_trainer import (
-    LoRATrainer,
-    LoRAConfig,
-)
-from app.training.imitation_learning import ImitationLearning
-from app.training.tpo_service import (
-    TPOService,
-    RewardModel,
-    TestTimeRL,
-)
-from app.training.training_pipeline import (
-    TrainingPipeline,
-    TrainingPipelineResult,
-    TrainingStageResult,
-)
-
-# 硬件配置
-from app.training.hardware_config import (
-    RTX4070Config,
-    RLTrainingConfig,  # 向后兼容
-    CPUOnlyConfig,
-    get_recommended_config,
+from app.training.data_quality_audit import (
+    DataQualityAuditor,
+    AuditResult,
+    QualityIssue,
 )
 
 __all__ = [
-    # GRPO
-    "GRPOTrainer",
-    "GRPOConfig",
-    "GRPOPolicy",
-    "RewardFunction",
-    "GroupRewardNormalizer",
-    "WritingAction",
-    "Episode",
-    # LoRA
-    "LoRATrainer",
-    "LoRAConfig",
-    # 模仿学习
-    "ImitationLearning",
-    # TPO
-    "TPOService",
-    "RewardModel",
-    "TestTimeRL",
-    # Pipeline
-    "TrainingPipeline",
-    "TrainingPipelineResult",
-    "TrainingStageResult",
-    # 硬件配置
-    "RTX4070Config",
-    "RLTrainingConfig",
-    "CPUOnlyConfig",
-    "get_recommended_config",
+    # LLM-as-Judge
+    "LLMJudge",
+    "JudgeDimension",
+    "DimensionScore",
+    "JudgeVerdict",
+    "ComparisonResult",
+    # 数据质量审计
+    "DataQualityAuditor",
+    "AuditResult",
+    "QualityIssue",
 ]

@@ -20,6 +20,9 @@ import aiohttp
 from app.core.config import settings
 from app.core.llm_config_manager import llm_config, LLMConfigManager
 
+# P0-2: DeepSeek json_object 支持探测标志（None=未知，True=支持，False=网关不支持已降级）
+_deepseek_json_mode_supported: Optional[bool] = None
+
 
 class LLMProvider(str, Enum):
     """LLM提供商"""
@@ -47,7 +50,7 @@ class LLMService:
         provider: Optional[LLMProvider] = None,
         model: Optional[str] = None,
         temperature: float = 0.7,
-        max_tokens: int = 4000,
+        max_tokens: int = 8192,
         chat2api_base_url: Optional[str] = None
     ):
         # 从配置管理器读取配置
@@ -220,7 +223,7 @@ class LLMService:
         
         try:
             from langchain_core.messages import SystemMessage, HumanMessage, AIMessage
-            
+
             langchain_messages = []
             for msg in messages:
                 role = msg.get("role", "user")
@@ -231,9 +234,14 @@ class LLMService:
                     langchain_messages.append(HumanMessage(content=content))
                 elif role == "assistant":
                     langchain_messages.append(AIMessage(content=content))
-            
-            logger.info(f"[LLM] 调用OpenAI API: model={self.model}, messages={len(langchain_messages)}")
-            response = await self.openai_client.ainvoke(langchain_messages)
+
+            logger.info(f"[LLM] 调用OpenAI API: model={self.model}, messages={len(langchain_messages)}, json_mode={json_mode}")
+            # P0-2: json_mode 时显式声明 response_format，避免依赖模型自觉
+            if json_mode:
+                bound_client = self.openai_client.bind(response_format={"type": "json_object"})
+            else:
+                bound_client = self.openai_client
+            response = await bound_client.ainvoke(langchain_messages)
             return response.content
         except Exception as e:
             logger.error(f"OpenAI API调用失败: {e}")
@@ -266,23 +274,31 @@ class LLMService:
         model = self.model or settings.DEEPSEEK_MODEL
         timeout = config.get("timeout") or 300
 
-        payload = {
-            "model": model,
-            "messages": [
-                {"role": m.get("role", "user"), "content": m.get("content", "")}
-                for m in messages
-            ],
-            "temperature": self.temperature,
-            "max_tokens": self.max_tokens,
-            "stream": True,
-        }
-
-        logger.info(f"[LLM] 调用DeepSeek API(流式): model={model}, base_url={base_url}")
+        logger.info(f"[LLM] 调用DeepSeek API(流式): model={model}, base_url={base_url}, json_mode={bool(json_mode)}")
         # 对网关限流/过载(429/5xx)做指数退避重试，保证长时间批量生成稳定。
         # 联影网关过载可能持续数十分钟：LLM_RETRIES 控制次数，LLM_RETRY_BACKOFF_MAX 控制最大单次等待(默认30分钟)。
         retries = int(os.environ.get("LLM_RETRIES", "24"))
         backoff_max = int(os.environ.get("LLM_RETRY_BACKOFF_MAX", "1800"))
+
+        # P0-2: json_mode 时附加 response_format；网关不支持则探测后降级为 prompt 约束（仅记录，不阻塞）
+        global _deepseek_json_mode_supported
+        want_json_mode = bool(json_mode)
+        if want_json_mode and _deepseek_json_mode_supported is False:
+            want_json_mode = False
+
         for attempt in range(1, retries + 1):
+            payload = {
+                "model": model,
+                "messages": [
+                    {"role": m.get("role", "user"), "content": m.get("content", "")}
+                    for m in messages
+                ],
+                "temperature": self.temperature,
+                "max_tokens": self.max_tokens,
+                "stream": True,
+            }
+            if want_json_mode:
+                payload["response_format"] = {"type": "json_object"}
             try:
                 async with httpx.AsyncClient(timeout=timeout, trust_env=False) as client:
                     async with client.stream(
@@ -292,6 +308,14 @@ class LLMService:
                     ) as resp:
                         if resp.status_code != 200:
                             body = (await resp.aread()).decode("utf-8", "replace")
+                            if want_json_mode and resp.status_code in (400, 422):
+                                _deepseek_json_mode_supported = False
+                                logger.warning(
+                                    f"[LLM] DeepSeek json_object 不被网关支持(HTTP {resp.status_code}: {body[:150]})，"
+                                    f"降级为 prompt 约束"
+                                )
+                                want_json_mode = False
+                                continue
                             if resp.status_code in (429, 500, 502, 503, 504) and attempt < retries:
                                 raise _RetryableLLMError(body[:200])
                             raise RuntimeError(
@@ -314,6 +338,8 @@ class LLMService:
                             delta = choices[0].get("delta", {}).get("content")
                             if delta:
                                 content += delta
+                if want_json_mode and _deepseek_json_mode_supported is None:
+                    _deepseek_json_mode_supported = True
                 return content.strip()
             except _RetryableLLMError as e:
                 backoff = min(2 ** attempt, backoff_max)
@@ -582,27 +608,29 @@ def _get_config_hash() -> str:
 
 def get_llm_service(
     provider: Optional[LLMProvider] = None,
-    model: Optional[str] = None
+    model: Optional[str] = None,
+    max_tokens: Optional[int] = None,
 ) -> LLMService:
     """获取LLM服务实例（带缓存）"""
     global _last_config_hash, _llm_instances
-    
+
     config = LLMConfigManager.get_config()
     config_provider = config.get("provider", settings.LLM_PROVIDER)
-    
+
     current_hash = _get_config_hash()
     if current_hash != _last_config_hash:
         logger.info(f"[LLM] 配置变化检测到，清除旧缓存")
         _llm_instances.clear()
         _last_config_hash = current_hash
-    
+
     provider = provider or LLMProvider(config_provider)
     model = model or config.get("model") or settings.OPENAI_MODEL
-    
-    cache_key = f"{provider.value}_{model}"
-    
+    max_tokens = max_tokens or settings.OPENAI_MAX_TOKENS
+
+    cache_key = f"{provider.value}_{model}_{max_tokens}"
+
     if cache_key not in _llm_instances:
-        logger.info(f"[LLM] 创建新的LLM服务实例: provider={provider.value}, model={model}")
-        _llm_instances[cache_key] = LLMService(provider=provider, model=model)
-    
+        logger.info(f"[LLM] 创建新的LLM服务实例: provider={provider.value}, model={model}, max_tokens={max_tokens}")
+        _llm_instances[cache_key] = LLMService(provider=provider, model=model, max_tokens=max_tokens)
+
     return _llm_instances[cache_key]

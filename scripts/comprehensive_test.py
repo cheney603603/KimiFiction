@@ -171,50 +171,30 @@ async def test_llm_services():
         result.add("LLM", "LLM Service", False, str(e))
 
 
-# ============ 4. Training System ============
+# ============ 4. Training/Quality Tools ============
 async def test_training():
     logger.info("\n" + "="*50)
-    logger.info("4. Training System")
+    logger.info("4. Quality Tools (RL 体系已移除)")
     logger.info("="*50)
-    
-    from app.training import (
-        GRPOConfig, WritingAction, Episode,
-        LoRAConfig, ImitationLearning, RTX4070Config
-    )
-    
+
     try:
-        config = GRPOConfig()
-        result.add("Training", "GRPO Config", True, f"group_size={config.group_size}")
+        from app.training import LLMJudge, DataQualityAuditor
+        judge = LLMJudge()
+        result.add("Training", "LLMJudge import", True, f"dims={len(getattr(judge, 'dimensions', []) or [])}")
     except Exception as e:
-        result.add("Training", "GRPO Config", False, str(e))
-    
+        result.add("Training", "LLMJudge import", False, str(e))
+
     try:
-        lora_config = LoRAConfig()
-        result.add("Training", "LoRA Config", True, f"r={lora_config.r}, alpha={lora_config.lora_alpha}")
+        from app.training.data_quality_audit import DataQualityAuditor
+        auditor = DataQualityAuditor([])
+        result.add("Training", "DataQualityAuditor", True, "ok")
     except Exception as e:
-        result.add("Training", "LoRA Config", False, str(e))
-    
+        result.add("Training", "DataQualityAuditor", False, str(e))
+
     try:
-        hw_config = RTX4070Config()
-        result.add("Training", "Hardware Config", True, f"model={hw_config.model_name}")
-    except Exception as e:
-        result.add("Training", "Hardware Config", False, str(e))
-    
-    try:
-        ref_dir = Path(r"D:\310Programm\KimiFiction\reference")
-        if ref_dir.exists():
-            il = ImitationLearning(str(ref_dir))
-            num_novels = len(il.reference_novels) if hasattr(il, 'reference_novels') else 0
-            result.add("Training", "Imitation Learning", True, f"{num_novels} novels")
-        else:
-            result.add("Training", "Imitation Learning", False, "Dir not exists")
-    except Exception as e:
-        result.add("Training", "Imitation Learning", False, str(e)[:50])
-    
-    try:
-        from app.writer_reader_rl import RewardFunction
+        from app.writer_reader_loop import RewardFunction
         rf = RewardFunction()
-        reward, details = rf.compute(reader_feedback={"score": 0.8}, draft="test" * 100)
+        reward, details = rf.compute(reader_feedback={"reader_score": 0.8}, draft="test" * 100)
         result.add("Training", "Reward Function", True, f"reward={reward:.3f}")
     except Exception as e:
         result.add("Training", "Reward Function", False, str(e))

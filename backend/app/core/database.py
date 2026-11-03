@@ -112,6 +112,13 @@ def _ensure_mysql_schema(sync_conn) -> None:
                 "ADD COLUMN reader_visible TINYINT(1) NOT NULL DEFAULT 1 COMMENT '读者端是否可见' "
                 "AFTER price_points"
             )
+        # P0-9: 硬门禁 flagged 状态
+        if "status" in chapter_columns:
+            alter_statements.append(
+                "ALTER TABLE chapters "
+                "MODIFY COLUMN status ENUM('draft','review','published','flagged') "
+                "NOT NULL DEFAULT 'draft' COMMENT '状态'"
+            )
 
     for statement in alter_statements:
         logger.warning(f"检测到旧版 MySQL 表结构，自动执行补齐: {statement}")

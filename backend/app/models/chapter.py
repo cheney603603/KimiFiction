@@ -16,6 +16,7 @@ class ChapterStatus(str, enum.Enum):
     DRAFT = "draft"           # 草稿
     REVIEW = "review"         # 审核中
     PUBLISHED = "published"   # 已发布
+    FLAGGED = "flagged"       # 硬门禁未通过，标记待人工
 
 
 class Chapter(Base):

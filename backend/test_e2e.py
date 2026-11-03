@@ -1,13 +1,13 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""端到端 Writer-Reader RL 测试脚本"""
+"""端到端 Writer-Reader 对抗循环测试脚本"""
 import sys, os, asyncio, re, time
 sys.path.insert(0, os.path.dirname(__file__))
 
 from app.services.llm_service import LLMService, LLMProvider
 from app.agents.writer import ChapterWriterAgent
 from app.agents.reader import ReaderAgent
-from app.writer_reader_rl import WriterReaderLoop
+from app.writer_reader_loop import WriterReaderLoop
 
 
 def clean_think(raw):

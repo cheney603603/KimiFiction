@@ -54,7 +54,7 @@ CREATE TABLE IF NOT EXISTS chapters (
     key_events JSON COMMENT '关键事件列表',
     characters_present JSON COMMENT '出场角色列表',
     word_count INT DEFAULT 0 COMMENT '字数统计',
-    status ENUM('draft', 'review', 'published') DEFAULT 'draft' COMMENT '状态',
+    status ENUM('draft', 'review', 'published', 'flagged') DEFAULT 'draft' COMMENT '状态',
     generation_params JSON COMMENT '生成参数',
     quality_score FLOAT COMMENT '质量评分',
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,

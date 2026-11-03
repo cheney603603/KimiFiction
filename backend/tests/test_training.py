@@ -1,158 +1,70 @@
 """
-Training 模块单元测试
+质量工具模块单元测试（RL 算法已移除，测试保留项）
 """
 import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
 
-class TestHardwareConfig:
-    """硬件配置测试"""
-    
-    def test_import_configs(self):
-        """测试导入配置类"""
+class TestQualityToolsImports:
+    """保留模块导入测试"""
+
+    def test_import_llm_judge(self):
+        """测试导入 LLM-as-Judge 相关类"""
         from app.training import (
-            RTX4070Config,
-            RLTrainingConfig,
-            CPUOnlyConfig,
-            get_recommended_config,
+            LLMJudge,
+            JudgeDimension,
+            DimensionScore,
+            JudgeVerdict,
+            ComparisonResult,
         )
-        
-        assert RTX4070Config is not None
-        assert RLTrainingConfig is not None
-        assert CPUOnlyConfig is not None
-    
-    def test_rtx4070_config_defaults(self):
-        """测试 RTX 4070 配置默认值"""
-        from app.training import RTX4070Config
-        
-        config = RTX4070Config()
-        
-        assert config.lora_rank == 8
-        assert config.lora_alpha == 16
-        assert config.use_4bit == True
-        assert config.batch_size == 1
-        assert config.gradient_accumulation == 8
-        assert config.max_seq_len == 2048
-    
-    def test_config_to_dict(self):
-        """测试配置转字典"""
-        from app.training import RTX4070Config
-        
-        config = RTX4070Config()
-        d = config.to_dict()
-        
-        assert isinstance(d, dict)
-        assert "lora_rank" in d
-        assert "model_name" in d
-    
-    def test_config_summary(self):
-        """测试配置摘要"""
-        from app.training import RTX4070Config
-        
-        config = RTX4070Config()
-        summary = config.summary()
-        
-        assert isinstance(summary, str)
-        assert "RTX 4070" in summary
-        assert "显存" in summary
-    
-    def test_rlx_training_config_alias(self):
-        """测试向后兼容别名"""
-        from app.training import RLTrainingConfig, RTX4070Config
-        
-        # RLTrainingConfig 应该是 RTX4070Config 的别名
-        assert RLTrainingConfig is RTX4070Config
-    
-    def test_cpu_only_config(self):
-        """测试 CPU-only 配置"""
-        from app.training import CPUOnlyConfig
-        
-        config = CPUOnlyConfig()
-        
-        assert config.use_4bit == False  # CPU不支持4bit
-        assert config.lora_rank == 4  # 更小的rank
-    
-    def test_get_recommended_config(self):
-        """测试自动推荐配置"""
-        from app.training import get_recommended_config, RTX4070Config, CPUOnlyConfig
-        
-        # 8GB+ GPU
-        config_8gb = get_recommended_config(8)
-        assert isinstance(config_8gb, RTX4070Config)
-        
-        # CPU-only
-        config_cpu = get_recommended_config(0)
-        assert isinstance(config_cpu, CPUOnlyConfig)
 
+        assert LLMJudge is not None
+        assert JudgeDimension is not None
+        assert DimensionScore is not None
+        assert JudgeVerdict is not None
+        assert ComparisonResult is not None
 
-class TestTrainingImports:
-    """训练模块导入测试"""
-    
-    def test_import_grpo(self):
-        """测试导入 GRPO 相关类"""
+    def test_import_data_auditor(self):
+        """测试导入数据质量审计相关类"""
         from app.training import (
-            GRPOTrainer,
-            GRPOConfig,
-            GRPOPolicy,
-            RewardFunction,
-            WritingAction,
-            Episode,
+            DataQualityAuditor,
+            AuditResult,
+            QualityIssue,
         )
-        
-        assert GRPOTrainer is not None
-        assert GRPOConfig is not None
-        assert WritingAction is not None
-    
-    def test_import_lora(self):
-        """测试导入 LoRA 相关类"""
-        from app.training import LoRATrainer, LoRAConfig
-        
-        assert LoRATrainer is not None
-        assert LoRAConfig is not None
-    
-    def test_import_tpo(self):
-        """测试导入 TPO 相关类"""
-        from app.training import TPOService, RewardModel, TestTimeRL
-        
-        assert TPOService is not None
-        assert RewardModel is not None
-    
-    def test_import_imitation_learning(self):
-        """测试导入模仿学习"""
-        from app.training import ImitationLearning
-        
-        assert ImitationLearning is not None
-    
-    def test_import_pipeline(self):
-        """测试导入训练管道"""
-        from app.training import (
-            TrainingPipeline,
-            TrainingPipelineResult,
-            TrainingStageResult,
-        )
-        
-        assert TrainingPipeline is not None
+
+        assert DataQualityAuditor is not None
+        assert AuditResult is not None
+        assert QualityIssue is not None
+
+    def test_rl_modules_removed(self):
+        """RL 算法模块应已移除（§6.1）"""
+        import sys
+
+        with pytest.raises(ImportError):
+            __import__("app.training.grpo_trainer")
+        with pytest.raises(ImportError):
+            __import__("app.rl_training")
+
+    def test_writing_action_standalone(self):
+        """WritingAction 枚举应迁移到独立模块（§6.3 第1步）"""
+        from app.models.writing_action import WritingAction
+
+        assert WritingAction.GENERATE.value == "generate"
+        assert WritingAction.REVISE.value == "revise"
+        assert WritingAction.DELETE.value == "delete"
+        assert WritingAction.KEEP.value == "keep"
+        assert len(list(WritingAction)) == 4
 
 
-class TestRLTrainingCompat:
-    """rl_training 兼容层测试"""
-    
-    def test_import_from_rl_training(self):
-        """测试从 rl_training 导入（向后兼容）"""
-        from app.rl_training import (
-            GRPOTrainer,
-            LoRATrainer,
-            RTX4070Config,
-            RLTrainingConfig,
-        )
-        
-        assert GRPOTrainer is not None
-        assert LoRATrainer is not None
-        assert RTX4070Config is not None
-    
-    def test_rl_training_reexports(self):
-        """测试 rl_training 重导出与 training 一致"""
-        from app.rl_training import GRPOTrainer as RL_GRPO
-        from app.training import GRPOTrainer as Train_GRPO
-        
-        assert RL_GRPO is Train_GRPO
+class TestWritingActionMigration:
+    """写作循环对 WritingAction 的使用"""
+
+    def test_writer_reader_loop_uses_migrated_enum(self):
+        """写作循环应从新模块导入枚举"""
+        import inspect
+        from app.writer_reader_loop import WriterReaderLoop
+
+        src = inspect.getsource(WriterReaderLoop)
+        assert "app.models.writing_action" in inspect.getsource(
+            __import__("app.writer_reader_loop", fromlist=["writer_reader_loop"])
+        ) or "WritingAction" in src

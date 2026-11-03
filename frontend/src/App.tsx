@@ -15,10 +15,8 @@ import { WorkflowPage } from './pages/WorkflowPage'
 import { LLMSettings } from './pages/LLMSettings'
 import { Login } from './pages/Login'
 import { Register } from './pages/Register'
-// 新的多智能体协作和RL训练可视化页面
+// 多智能体协作与评测页面
 import { AgentWorkflow } from './pages/AgentWorkflow'
-import { TrainingDashboard } from './pages/TrainingDashboard'
-import { RLVisualization } from './pages/RLVisualization'
 import { Evaluation } from './pages/Evaluation'
 import EvaluationOptimizer from './pages/EvaluationOptimizer'
 import SnapshotsPage from './pages/SnapshotsPage'
@@ -66,10 +64,8 @@ function App() {
         <Route path="novel/:novelId/workflow/new" element={<WorkflowPage />} />
         <Route path="settings/llm" element={<LLMSettings />} />
 
-        {/* 新增：多智能体协作与RL训练 */}
+        {/* 多智能体协作与评测 */}
         <Route path="workflow/graph" element={<AgentWorkflow />} />
-        <Route path="training" element={<TrainingDashboard />} />
-        <Route path="training/:batchId" element={<RLVisualization />} />
         <Route path="evaluation" element={<Evaluation />} />
         <Route path="evaluation/optimizer" element={<EvaluationOptimizer />} />
         <Route path="novel/:novelId/snapshots" element={<SnapshotsPage />} />

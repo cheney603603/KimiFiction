@@ -61,7 +61,7 @@ class Settings(BaseSettings):
     OPENAI_BASE_URL: str = Field(default="https://api.openai.com/v1", description="OpenAI基础URL")
     OPENAI_MODEL: str = Field(default="gpt-4-turbo-preview", description="默认模型")
     OPENAI_TEMPERATURE: float = Field(default=0.7, description="生成温度")
-    OPENAI_MAX_TOKENS: int = Field(default=4000, description="最大token数")
+    OPENAI_MAX_TOKENS: int = Field(default=8192, description="最大token数")
     
     # LLM提供商配置
     LLM_PROVIDER: str = Field(default="deepseek", description="LLM提供商: openai/kimi/deepseek/yuanbao/local_llama")
@@ -91,6 +91,9 @@ class Settings(BaseSettings):
     # 章节写入后是否执行 Rubric 八维评测（每次 = 8 次 LLM 调用，开销大，默认关闭以降低 50 章总调用量）
     RUN_POST_WRITE_RUBRIC: bool = Field(default=False, description="写入章节后是否运行 Rubric 八维评测")
     RUN_POST_WRITE_ENTITY_EXTRACTION: bool = Field(default=True, description="写入章节后是否对正文做实体抽取")
+
+    # 写作管线 V2（P1：分场景生成 + 硬门禁 + 盲评 + 诊断，§9 回滚策略：默认关闭）
+    WRITING_PIPELINE_V2: bool = Field(default=False, description="启用分场景写作管线 V2")
     
     # 记忆管理配置
     WORKING_MEMORY_CHAPTERS: int = Field(default=3, description="工作记忆章节数")

@@ -29,7 +29,7 @@ class TrackedLLMService(LLMService):
         provider: Optional[LLMProvider] = None,
         model: Optional[str] = None,
         temperature: float = 0.7,
-        max_tokens: int = 4000,
+        max_tokens: int = 8192,
         chat2api_base_url: Optional[str] = None,
         novel_id: Optional[int] = None,
         agent_name: str = "unknown",

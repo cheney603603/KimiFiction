@@ -777,6 +777,26 @@ async def write_chapter(
                                             chapter_row.feedbacks = feedbacks_json
                                             await db.commit()
                                     logger.info(f"[write_chapter] 创建章节到数据库: novel_id={novel_id}, chapter={request.chapter_number}, words={word_count}")
+
+                                # P0-9: 硬门禁 flagged 状态落库
+                                if result.data.get("flagged"):
+                                    from app.models.chapter import Chapter, ChapterStatus
+                                    stmt = select(Chapter).where(
+                                        Chapter.novel_id == novel_id,
+                                        Chapter.chapter_number == request.chapter_number,
+                                    )
+                                    chapter_row = (await db.execute(stmt)).scalar_one_or_none()
+                                    if chapter_row:
+                                        chapter_row.status = ChapterStatus.FLAGGED
+                                        gp = dict(chapter_row.generation_params or {})
+                                        gp["flagged"] = True
+                                        gp["gate_failures"] = result.data.get("gate_failures", [])
+                                        chapter_row.generation_params = gp
+                                        await db.commit()
+                                        logger.warning(
+                                            f"[write_chapter] 章节 {request.chapter_number} 已标记 flagged（硬门禁未通过）"
+                                        )
+
                         await tracker.add_log("write_chapter", "章节已自动保存到数据库", "info")
                     except Exception as save_error:
                         logger.error(f"[write_chapter] 自动保存章节失败: {save_error}")

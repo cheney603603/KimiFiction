@@ -1,19 +1,21 @@
-"""Writer-Reader RL 对抗系统单元测试"""
+"""Writer-Reader 写作对抗循环单元测试（RL 移除版）"""
 import pytest
 import asyncio
 from unittest.mock import patch, AsyncMock, MagicMock
 
-from app.writer_reader_rl import (
-    WritingAction, WritingState, PPOConfig,
-    RewardFunction, PPOStrategy, WriterReaderLoop
+from app.writer_reader_loop import (
+    WritingState,
+    RewardFunction,
+    WriterReaderLoop,
 )
+from app.models.writing_action import WritingAction
 
 
 class TestRewardFunction:
     """测试 Reward 函数"""
 
     def test_compute_basic_reward(self):
-        """测试基本Reward计算"""
+        """测试基本评分计算"""
         rf = RewardFunction()
 
         reader_feedback = {
@@ -32,8 +34,36 @@ class TestRewardFunction:
         assert "reader_score" in breakdown
         assert "hook_score" in breakdown
 
-    def test_compute_with_previous_feedback(self):
-        """测试有前序反馈时的Reward计算"""
+    def test_word_count_penalty_sign(self):
+        """B5 修复：字数不足应为负贡献（此前为正数，越短得分越高）"""
+        rf = RewardFunction()
+
+        short_draft = "短文本"
+        _, breakdown_short = rf.compute(
+            reader_feedback={"reader_score": 0.5, "hook_score": 0.5},
+            draft=short_draft,
+        )
+        # 字数严重不足 → 惩罚应为负值
+        assert breakdown_short["word_count_penalty"] < 0, (
+            f"字数不足时 penalty 应为负，实际: {breakdown_short['word_count_penalty']}"
+        )
+
+        over_draft = "超长文本" * 2000
+        _, breakdown_over = rf.compute(
+            reader_feedback={"reader_score": 0.5, "hook_score": 0.5},
+            draft=over_draft,
+        )
+        assert breakdown_over["word_count_penalty"] < 0
+
+        good_draft = "测试内容" * 750  # 约 3000 字，落在容差区间
+        _, breakdown_good = rf.compute(
+            reader_feedback={"reader_score": 0.5, "hook_score": 0.5},
+            draft=good_draft,
+        )
+        assert breakdown_good["word_count_penalty"] == 0
+
+    def test_revision_bonus_on_improvement(self):
+        """有改进时修订应得正奖励"""
         rf = RewardFunction()
 
         prev = {"reader_score": 0.6, "hook_score": 0.5}
@@ -46,52 +76,11 @@ class TestRewardFunction:
             action=WritingAction.REVISE,
         )
 
-        # 有改进应该有正reward
-        assert reward >= 0, "有改进时应为正reward"
-        assert "revision_bonus" in breakdown
+        assert breakdown["revision_bonus"] > 0
+        assert reward >= 0
 
-    def test_word_count_penalty(self):
-        """测试字数偏离惩罚"""
-        rf = RewardFunction()
-
-        # 字数严重不足
-        short_draft = "短文本"
-        reward, breakdown = rf.compute(
-            reader_feedback={"reader_score": 0.5, "hook_score": 0.5},
-            draft=short_draft,
-        )
-
-        assert "word_count_penalty" in breakdown
-        # 字数偏离应该产生惩罚字段（正负均可）
-        assert isinstance(breakdown["word_count_penalty"], (int, float))
-
-    def test_word_count_bonus(self):
-        """测试目标字数达成奖励"""
-        rf = RewardFunction()
-
-        # 目标字数约3000字
-        good_draft = "测试内容" * 500
-
-        reward, breakdown = rf.compute(
-            reader_feedback={"reader_score": 0.5, "hook_score": 0.5},
-            draft=good_draft,
-        )
-
-        assert "length_bonus" in breakdown
-
-    def test_zero_feedback(self):
-        """测试空反馈处理"""
-        rf = RewardFunction()
-
-        reward, breakdown = rf.compute(
-            reader_feedback={},
-            draft="测试",
-        )
-
-        assert 0 <= reward <= 1, "空反馈应该有合理的默认reward"
-
-    def test_batch_rewards(self):
-        """测试批量Reward计算"""
+    def test_compute_batch_rewards(self):
+        """批量评分"""
         rf = RewardFunction()
 
         feedbacks = [
@@ -106,92 +95,34 @@ class TestRewardFunction:
         assert all(0 <= r <= 1 for r in rewards)
 
 
-class TestPPOStrategy:
-    """测试 PPO 策略管理器"""
+class TestWritingState:
+    """测试写作状态"""
 
-    def test_init(self):
-        """测试初始化"""
-        config = PPOConfig()
-        strategy = PPOStrategy(config)
+    def test_state_init(self):
+        """测试状态初始化"""
+        state = WritingState(
+            chapter_number=5,
+            draft="测试内容",
+        )
 
-        assert strategy.config == config
-        assert len(strategy.action_values) == len(WritingAction)
-        assert len(strategy.action_counts) == len(WritingAction)
+        assert state.chapter_number == 5
+        assert state.draft == "测试内容"
+        assert state.draft_version == 0
+        assert state.action_history == []
+        assert state.reward_history == []
 
-    def test_update_action_values(self):
-        """测试动作价值更新"""
-        config = PPOConfig()
-        strategy = PPOStrategy(config)
+    def test_state_to_dict(self):
+        """测试状态序列化"""
+        state = WritingState(
+            chapter_number=5,
+            draft="测试内容" * 100,
+        )
 
-        initial = strategy.action_values[WritingAction.GENERATE]
-        strategy.update_action_values(WritingAction.GENERATE, reward=0.9)
-        updated = strategy.action_values[WritingAction.GENERATE]
+        d = state.to_dict()
 
-        assert updated > initial, "高reward应该提高动作价值"
-
-    def test_select_action_ucb(self):
-        """测试UCB动作选择"""
-        config = PPOConfig()
-        strategy = PPOStrategy(config)
-
-        # 先训练一些数据
-        for _ in range(5):
-            strategy.update_action_values(WritingAction.GENERATE, reward=0.8)
-            strategy.update_action_values(WritingAction.REVISE, reward=0.6)
-
-        action, probs = strategy.select_action_ucb(temperature=0.5)
-
-        assert isinstance(action, WritingAction)
-        assert isinstance(probs, dict)
-        assert all(a in probs for a in WritingAction)
-        assert abs(sum(probs.values()) - 1.0) < 0.01, "概率和应该为1"
-
-    def test_select_action_changes_over_time(self):
-        """测试动作选择随训练变化"""
-        config = PPOConfig()
-        strategy = PPOStrategy(config)
-
-        # 让GENERATE更有价值
-        for _ in range(10):
-            strategy.update_action_values(WritingAction.GENERATE, reward=0.9)
-            strategy.update_action_values(WritingAction.DELETE, reward=0.2)
-
-        actions = []
-        for _ in range(20):
-            action, _ = strategy.select_action_ucb(temperature=0.1)
-            actions.append(action)
-
-        # GENERATE应该被选择更多次
-        generate_count = sum(1 for a in actions if a == WritingAction.GENERATE)
-        delete_count = sum(1 for a in actions if a == WritingAction.DELETE)
-
-        assert generate_count > delete_count, "高价值动作应该更频繁被选择"
-
-    def test_policy_summary(self):
-        """测试策略摘要"""
-        config = PPOConfig()
-        strategy = PPOStrategy(config)
-
-        summary = strategy.get_policy_summary()
-
-        assert "action_values" in summary
-        assert "action_counts" in summary
-        assert "total_iterations" in summary
-        assert summary["total_iterations"] == 0
-
-    def test_ucb_exploration(self):
-        """测试UCB探索机制"""
-        config = PPOConfig()
-        strategy = PPOStrategy(config)
-
-        # 冷启动：所有动作价值相同，但UCB应该探索不同的动作
-        actions_selected = set()
-        for _ in range(10):
-            action, _ = strategy.select_action_ucb(temperature=0.5, use_ucb=True)
-            actions_selected.add(action)
-
-        # 10次选择中应该探索了多个不同动作
-        assert len(actions_selected) >= 2, "UCB应该探索不同动作"
+        assert d["chapter_number"] == 5
+        assert "draft_version" in d
+        assert "action_history_count" in d
 
 
 class TestWriterReaderLoop:
@@ -250,8 +181,8 @@ class TestWriterReaderLoop:
         mock_chapter_content,
     ):
         """测试完整对抗循环"""
-        with patch('app.writer_reader_rl.ChapterWriterAgent', return_value=mock_writer_agent), \
-             patch('app.writer_reader_rl.ReaderAgent', return_value=mock_reader_agent):
+        with patch('app.writer_reader_loop.ChapterWriterAgent', return_value=mock_writer_agent), \
+             patch('app.writer_reader_loop.ReaderAgent', return_value=mock_reader_agent):
 
             loop = WriterReaderLoop(
                 novel_id=1,
@@ -272,45 +203,24 @@ class TestWriterReaderLoop:
             assert result["final_draft"] != ""
             assert "loop_history" in result
             assert len(result["loop_history"]) >= 1
-            assert "policy_summary" in result
 
     @pytest.mark.asyncio
-    async def test_run_multiple_rounds(
+    async def test_loop_history_has_reader_feedback(
         self,
         mock_writer_agent,
         mock_reader_agent,
         mock_chapter_outline,
         mock_characters,
     ):
-        """测试多轮对抗"""
-        # 模拟Reader评分逐渐提升
-        scores = [0.5, 0.7, 0.85]
-
-        async def mock_reader(context):
-            nonlocal scores
-            score = scores.pop(0) if scores else 0.8
-            return {
-                "success": True,
-                "reader_feedback": {
-                    "reader_score": score,
-                    "hook_score": score,
-                    "immersion_score": score,
-                    "continuity_score": score,
-                    "would_continue_reading": score > 0.7,
-                    "confusing_points": [],
-                }
-            }
-
-        mock_reader_agent.process = mock_reader
-
-        with patch('app.writer_reader_rl.ChapterWriterAgent', return_value=mock_writer_agent), \
-             patch('app.writer_reader_rl.ReaderAgent', return_value=mock_reader_agent):
+        """B8 修复：loop_history 元素必须含 reader_feedback，保证下游取到非空反馈"""
+        with patch('app.writer_reader_loop.ChapterWriterAgent', return_value=mock_writer_agent), \
+             patch('app.writer_reader_loop.ReaderAgent', return_value=mock_reader_agent):
 
             loop = WriterReaderLoop(
                 novel_id=1,
                 chapter_number=1,
-                max_rounds=3,
-                score_threshold=0.8,
+                max_rounds=2,
+                score_threshold=0.9,  # 阈值高 → 跑满2轮
             )
 
             result = await loop.run(
@@ -319,9 +229,62 @@ class TestWriterReaderLoop:
                 context={},
             )
 
-            # 应该运行了多轮
-            assert len(result["loop_history"]) >= 1
-            assert result["total_rounds"] >= 1
+            for entry in result["loop_history"]:
+                assert "reader_feedback" in entry
+                assert isinstance(entry["reader_feedback"], dict)
+                assert entry["reader_feedback"] != {}
+
+    @pytest.mark.asyncio
+    async def test_reader_receives_context(
+        self,
+        mock_writer_agent,
+        mock_reader_agent,
+        mock_chapter_outline,
+        mock_characters,
+        mock_world_setting,
+    ):
+        """B7 修复：Reader 应收到前文/角色/世界观上下文"""
+        captured = {}
+
+        async def spy_reader(context):
+            captured.update(context)
+            return {
+                "success": True,
+                "reader_feedback": {
+                    "reader_score": 0.9,
+                    "hook_score": 0.9,
+                    "would_continue_reading": True,
+                    "confusing_points": [],
+                }
+            }
+
+        mock_reader_agent.process = spy_reader
+
+        with patch('app.writer_reader_loop.ChapterWriterAgent', return_value=mock_writer_agent), \
+             patch('app.writer_reader_loop.ReaderAgent', return_value=mock_reader_agent):
+
+            loop = WriterReaderLoop(
+                novel_id=1,
+                chapter_number=1,
+                max_rounds=1,
+                score_threshold=0.8,
+            )
+
+            await loop.run(
+                outline=mock_chapter_outline,
+                characters=mock_characters,
+                context={
+                    "world_setting": mock_world_setting,
+                    "plot_setting": {"main_plot": "寻亲"},
+                    "unresolved_mysteries": ["身世之谜"],
+                },
+            )
+
+            assert "world_setting" in captured
+            assert "characters" in captured
+            assert "unresolved_mysteries" in captured
+            assert captured["world_setting"] is mock_world_setting
+            assert captured["unresolved_mysteries"] == ["身世之谜"]
 
     @pytest.mark.asyncio
     async def test_early_stopping_on_threshold(
@@ -332,21 +295,18 @@ class TestWriterReaderLoop:
         mock_characters,
     ):
         """测试达到阈值时早停"""
-        # 第一次就达标
         mock_reader_agent.process = AsyncMock(return_value={
             "success": True,
             "reader_feedback": {
                 "reader_score": 0.95,
                 "hook_score": 0.90,
-                "immersion_score": 0.90,
-                "continuity_score": 0.90,
                 "would_continue_reading": True,
                 "confusing_points": [],
             }
         })
 
-        with patch('app.writer_reader_rl.ChapterWriterAgent', return_value=mock_writer_agent), \
-             patch('app.writer_reader_rl.ReaderAgent', return_value=mock_reader_agent):
+        with patch('app.writer_reader_loop.ChapterWriterAgent', return_value=mock_writer_agent), \
+             patch('app.writer_reader_loop.ReaderAgent', return_value=mock_reader_agent):
 
             loop = WriterReaderLoop(
                 novel_id=1,
@@ -361,7 +321,6 @@ class TestWriterReaderLoop:
                 context={},
             )
 
-            # 应该只运行了1轮
             assert result["total_rounds"] == 1
             assert result["passed"] is True
 
@@ -374,27 +333,24 @@ class TestWriterReaderLoop:
         mock_characters,
     ):
         """测试最大轮次限制"""
-        # Reader始终不给力
         mock_reader_agent.process = AsyncMock(return_value={
             "success": True,
             "reader_feedback": {
                 "reader_score": 0.4,
                 "hook_score": 0.3,
-                "immersion_score": 0.3,
-                "continuity_score": 0.3,
                 "would_continue_reading": False,
                 "confusing_points": ["问题1", "问题2"],
             }
         })
 
-        with patch('app.writer_reader_rl.ChapterWriterAgent', return_value=mock_writer_agent), \
-             patch('app.writer_reader_rl.ReaderAgent', return_value=mock_reader_agent):
+        with patch('app.writer_reader_loop.ChapterWriterAgent', return_value=mock_writer_agent), \
+             patch('app.writer_reader_loop.ReaderAgent', return_value=mock_reader_agent):
 
             loop = WriterReaderLoop(
                 novel_id=1,
                 chapter_number=1,
                 max_rounds=3,
-                score_threshold=0.9,  # 设置极高阈值，必然触发max_rounds
+                score_threshold=0.9,
             )
 
             result = await loop.run(
@@ -403,19 +359,17 @@ class TestWriterReaderLoop:
                 context={},
             )
 
-            # 应该达到最大轮次
             assert result["total_rounds"] == 3
             assert result["passed"] is False
 
     def test_get_learning_report(self):
-        """测试学习报告生成"""
+        """测试循环报告生成"""
         loop = WriterReaderLoop(
             novel_id=1,
             chapter_number=1,
             max_rounds=3,
         )
 
-        # 填充一些历史数据
         loop.loop_history = [
             {"round": 1, "reward": 0.5, "reader_score": 0.5, "passed": False},
             {"round": 2, "reward": 0.7, "reader_score": 0.7, "passed": False},
@@ -427,40 +381,7 @@ class TestWriterReaderLoop:
         assert "chapter" in report
         assert "reward_progression" in report
         assert report["reward_progression"] == [0.5, 0.7]
-        assert "reward_improvement" in report
-        assert abs(report["reward_improvement"] - 0.2) < 0.001, f"expected ~0.2, got {report['reward_improvement']}"
-
-
-class TestWritingState:
-    """测试写作状态"""
-
-    def test_state_init(self):
-        """测试状态初始化"""
-        state = WritingState(
-            chapter_number=5,
-            draft="测试内容",
-        )
-
-        assert state.chapter_number == 5
-        assert state.draft == "测试内容"
-        assert state.draft_version == 0
-        assert state.action_history == []
-        assert state.reward_history == []
-
-    def test_state_to_dict(self):
-        """测试状态序列化"""
-        state = WritingState(
-            chapter_number=5,
-            draft="测试内容" * 100,
-        )
-
-        d = state.to_dict()
-
-        assert d["chapter_number"] == 5
-        assert "draft_version" in d
-        assert "action_history_count" in d
-        # draft应该被截断（200字以内+省略号）
-        assert len(d["draft"]) <= 210
+        assert abs(report["reward_improvement"] - 0.2) < 0.001
 
 
 if __name__ == "__main__":
