@@ -629,12 +629,22 @@ async def write_chapter(
     """撰写指定章节（异步）"""
     from app.core.user_context import get_current_user_id, capture, apply
     from app.services.quota_service import QuotaService, QuotaExceeded
+    from app.core.config import settings
+    from app.core.gen_limiter import wait_turn, done as gen_done
 
     # 额度墙：免费层每月章节数上限（Pro 不限）
+    user_id = get_current_user_id()
     try:
-        await QuotaService(db).assert_can_generate_chapter(get_current_user_id())
+        await QuotaService(db).assert_can_generate_chapter(user_id)
     except QuotaExceeded as e:
         raise HTTPException(status_code=402, detail=str(e))
+
+    # 并发限制：free 同刻 1 个生成，Pro 用 PRO_CONCURRENCY
+    try:
+        tier = (await QuotaService(db).get_status(user_id)).get("tier", "free")
+    except Exception:
+        tier = "free"
+    _gen_limit = settings.PRO_CONCURRENCY if tier == "pro" else 1
 
     # 捕获用户上下文（后台任务脱离 HTTP 中间件作用域，需手动恢复 BYOK 配置）
     _user_ctx = capture()
@@ -676,6 +686,8 @@ async def write_chapter(
         async def _write():
             # 恢复发起请求用户的 BYOK 上下文（本任务是 BackgroundTask，不在中间件作用域内）
             apply(_user_ctx)
+            # 并发限制：同用户生成数不超过 _gen_limit
+            await wait_turn(_user_ctx.get("user_id"), _gen_limit)
             try:
                 await tracker.update_substep("write_chapter", 1, "初始化写作引擎...")
                 engine = await get_workflow_engine(novel_id)
@@ -817,7 +829,9 @@ async def write_chapter(
                 await tracker.fail_step("write_chapter", f"撰写超时（超过{timeout}秒）")
             except Exception as e:
                 await tracker.fail_step("write_chapter", str(e))
-        
+            finally:
+                gen_done(_user_ctx.get("user_id"))
+
         background_tasks.add_task(_write)
         
         return {

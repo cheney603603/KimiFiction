@@ -100,6 +100,8 @@ class Settings(BaseSettings):
     WORKER_CONCURRENCY: int = Field(default=2, description="任务队列工作进程并发数")
     # 批量管线总开关（false 时即使 Pro 也禁用 run_novel_pipeline 批量写）
     PRO_BATCH_ENABLED: bool = Field(default=True, description="批量管线(Pro)总开关")
+    # Pro 用户同时可进行的章节生成数（free 固定为 1）
+    PRO_CONCURRENCY: int = Field(default=4, description="Pro 用户章节生成并发上限")
     
     # 记忆管理配置
     WORKING_MEMORY_CHAPTERS: int = Field(default=3, description="工作记忆章节数")

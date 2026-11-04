@@ -172,6 +172,31 @@ class TestQuotaService:
 
 
 # ─────────────────────────────────────────────
+# 5. 章节生成并发限制（M3 轻量版）
+# ─────────────────────────────────────────────
+class TestGenLimiter:
+    @pytest.mark.asyncio
+    async def test_acquire_release(self):
+        from app.core.gen_limiter import wait_turn, done, _inflight
+        _inflight.clear()
+        await wait_turn(1, 1)
+        assert _inflight[1] == 1
+        done(1)
+        assert _inflight[1] == 0
+
+    @pytest.mark.asyncio
+    async def test_pro_multi_concurrent(self):
+        from app.core.gen_limiter import wait_turn, done, _inflight
+        _inflight.clear()
+        await wait_turn(1, 4)
+        await wait_turn(1, 4)
+        assert _inflight[1] == 2
+        done(1)
+        done(1)
+        assert _inflight[1] == 0
+
+
+# ─────────────────────────────────────────────
 # 4. 用户 LLM 配置快照（解密）
 # ─────────────────────────────────────────────
 class TestLLMUserConfigSnapshot:
