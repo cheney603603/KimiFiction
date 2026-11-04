@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { evaluationOptimizerApi } from '../services/api'
+import { evaluationOptimizerApi, novelApi } from '../services/api'
 
 // ─── 类型定义 ───────────────────────────────────────────────
 
@@ -65,6 +65,12 @@ interface OptimizationHistoryItem {
   applied_at?: string
 }
 
+interface RuleCsvBackup {
+  name: string
+  created_at: string
+  size: number
+}
+
 // ─── 组件 ───────────────────────────────────────────────
 
 export default function EvaluationOptimizer() {
@@ -92,11 +98,98 @@ export default function EvaluationOptimizer() {
   const [saveDescription, setSaveDescription] = useState('')
   const [showSaveDialog, setShowSaveDialog] = useState(false)
 
+  // 从我的小说自动采集
+  const [myNovels, setMyNovels] = useState<{ id: number; title: string; genre?: string | null }[]>([])
+  const [fromNovelId, setFromNovelId] = useState<number | null>(null)
+  const [maxGood, setMaxGood] = useState(3)
+  const [maxBad, setMaxBad] = useState(3)
+  const [fromNovelRunning, setFromNovelRunning] = useState(false)
+  const [fromNovelError, setFromNovelError] = useState('')
+
+  // 规则 CSV 备份/回滚
+  const [backups, setBackups] = useState<RuleCsvBackup[]>([])
+  const [showBackups, setShowBackups] = useState(false)
+  const [backupsLoading, setBackupsLoading] = useState(false)
+
   // 加载参考小说列表和历史记录
   useEffect(() => {
     loadReferenceNovels()
     loadHistory()
+    loadMyNovels()
   }, [])
+
+  const loadMyNovels = async () => {
+    try {
+      const res: any = await novelApi.list({ limit: 100 })
+      setMyNovels(res.items || res || [])
+    } catch (e: any) {
+      console.error('加载我的小说失败:', e)
+    }
+  }
+
+  // 从我的小说章节自动采集好/坏样本并优化规则
+  const handleOptimizeFromNovel = async () => {
+    if (!fromNovelId) {
+      setFromNovelError('请先选择要采集的小说')
+      return
+    }
+    const estimated = (maxGood + maxBad) * blocksPerNovel * 8 + maxGood + maxBad
+    if (!window.confirm(`将从所选小说的章节中自动区分好/坏样本并评测分析，预计约 ${estimated} 次 API 调用，是否继续？`)) return
+
+    setFromNovelError('')
+    setFromNovelRunning(true)
+    setError('')
+    setReport(null)
+    setLogs([])
+    setProgress('')
+    try {
+      const result = await evaluationOptimizerApi.optimizeFromNovel({
+        novel_id: fromNovelId,
+        max_good: maxGood,
+        max_bad: maxBad,
+        blocks_per_novel: blocksPerNovel,
+        max_bytes_per_block: maxBytesPerBlock,
+        genre,
+      })
+      setReport(result)
+      setLogs([
+        `[${new Date().toLocaleTimeString()}] 从小说自动采集完成`,
+        `[${new Date().toLocaleTimeString()}] 好样本: ${result.good_novels.join(', ')}`,
+        `[${new Date().toLocaleTimeString()}] 坏样本: ${result.bad_novels.join(', ')}`,
+        `[${new Date().toLocaleTimeString()}] 共 ${result.total_samples} 个样本`,
+      ])
+    } catch (e: any) {
+      setFromNovelError(e?.response?.data?.detail || e?.message || '采集分析失败')
+    } finally {
+      setFromNovelRunning(false)
+    }
+  }
+
+  // 加载规则 CSV 备份
+  const loadBackups = async () => {
+    setBackupsLoading(true)
+    try {
+      const res = await evaluationOptimizerApi.listRuleCsvBackups()
+      setBackups(res.backups || [])
+      setShowBackups(true)
+    } catch (e: any) {
+      alert('加载备份失败: ' + (e?.response?.data?.detail || e.message))
+    } finally {
+      setBackupsLoading(false)
+    }
+  }
+
+  // 恢复规则 CSV 备份
+  const handleRestoreBackup = async (filename: string) => {
+    if (!window.confirm(`用备份「${filename}」覆盖当前规则文件？恢复前会自动备份当前版本。`)) return
+    try {
+      const res = await evaluationOptimizerApi.restoreRuleCsvBackup(filename)
+      alert(`已恢复「${filename}」\n当前版本已备份为 ${res?.snapshot || ''}`)
+      await loadBackups()
+    } catch (e: any) {
+      alert('恢复失败: ' + (e?.response?.data?.detail || e.message))
+    }
+  }
 
   const loadReferenceNovels = async () => {
     try {
@@ -298,6 +391,12 @@ export default function EvaluationOptimizer() {
             >
               {showHistory ? '隐藏历史' : '查看历史'}
             </button>
+            <button
+              onClick={() => { if (!showBackups) loadBackups(); else setShowBackups(false) }}
+              className="px-4 py-2 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg text-sm"
+            >
+              {showBackups ? '隐藏备份' : '🛠 备份/回滚'}
+            </button>
           </div>
         </div>
 
@@ -354,6 +453,108 @@ export default function EvaluationOptimizer() {
             )}
           </div>
         )}
+
+        {/* 备份/回滚 */}
+        {showBackups && (
+          <div className="bg-gray-900 rounded-xl border border-gray-800 p-6">
+            <h2 className="text-lg font-semibold text-white mb-4">🛠 规则文件备份与回滚</h2>
+            {backupsLoading ? (
+              <p className="text-sm text-gray-400">加载备份列表...</p>
+            ) : backups.length === 0 ? (
+              <p className="text-gray-500 text-sm">
+                暂无备份。每次「应用优化」都会在规则文件旁自动生成 <code className="text-gray-400">.backup_时间戳</code> 备份，可在此回滚。
+              </p>
+            ) : (
+              <div className="space-y-2">
+                {backups.map(b => (
+                  <div key={b.name} className="flex items-center justify-between p-3 bg-gray-950 rounded-lg border border-gray-800">
+                    <div>
+                      <div className="font-mono text-sm text-gray-300">{b.name}</div>
+                      <div className="text-xs text-gray-500 mt-0.5">
+                        {new Date(b.created_at).toLocaleString()} · {(b.size / 1024).toFixed(1)} KB
+                      </div>
+                    </div>
+                    <button
+                      onClick={() => handleRestoreBackup(b.name)}
+                      className="px-3 py-1 bg-amber-600 hover:bg-amber-500 text-white text-xs rounded"
+                    >
+                      恢复此版本
+                    </button>
+                  </div>
+                ))}
+                <button
+                  onClick={loadBackups}
+                  className="text-xs text-indigo-400 hover:text-indigo-300 underline"
+                >
+                  刷新列表
+                </button>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* 从我的小说自动采集 */}
+        <div className="bg-gray-900 rounded-xl border border-gray-800 p-6 space-y-4">
+          <div>
+            <h2 className="text-lg font-semibold text-white">📚 从我的小说自动采集样本</h2>
+            <p className="text-gray-400 text-sm mt-1">
+              自动把 flagged / 低分章节归为坏样本、其余归为好样本，评测后直接产出规则优化报告，无需手动挑选小说文件。
+            </p>
+          </div>
+          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+            <div className="md:col-span-1 space-y-2">
+              <label className="text-sm text-gray-400">选择我的小说</label>
+              <select
+                value={fromNovelId ?? ''}
+                onChange={e => setFromNovelId(Number(e.target.value) || null)}
+                className="w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-white"
+              >
+                <option value="">— 选择小说 —</option>
+                {myNovels.map(n => (
+                  <option key={n.id} value={n.id}>
+                    {n.title}{n.genre ? `（${n.genre}）` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm text-gray-400">好样本上限</label>
+              <input
+                type="number"
+                value={maxGood}
+                onChange={e => setMaxGood(parseInt(e.target.value) || 1)}
+                min={1}
+                max={10}
+                className="w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-white"
+              />
+            </div>
+            <div className="space-y-2">
+              <label className="text-sm text-gray-400">坏样本上限</label>
+              <input
+                type="number"
+                value={maxBad}
+                onChange={e => setMaxBad(parseInt(e.target.value) || 1)}
+                min={1}
+                max={10}
+                className="w-full bg-gray-950 border border-gray-800 rounded-lg px-3 py-2 text-white"
+              />
+            </div>
+            <div className="space-y-2 flex items-end">
+              <button
+                onClick={handleOptimizeFromNovel}
+                disabled={fromNovelRunning}
+                className="w-full px-4 py-2 bg-indigo-600 hover:bg-indigo-500 disabled:bg-gray-700 text-white rounded-lg font-medium transition-colors"
+              >
+                {fromNovelRunning ? '采集中...' : '🚀 采集并分析'}
+              </button>
+            </div>
+          </div>
+          {fromNovelError && (
+            <div className="p-3 bg-red-950/50 border border-red-800 rounded-lg text-red-400 text-sm">
+              {fromNovelError}
+            </div>
+          )}
+        </div>
 
         {/* 配置区 */}
         <div className="bg-gray-900 rounded-xl border border-gray-800 p-6 space-y-6">

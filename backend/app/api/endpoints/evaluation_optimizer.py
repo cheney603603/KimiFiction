@@ -1594,3 +1594,190 @@ async def restore_backup(
         return {"success": True, "message": f"已恢复到备份: {backup_name}"}
     else:
         raise HTTPException(status_code=500, detail="恢复备份失败")
+
+
+# ============================================================
+# 从"我的小说"章节自动采集好/坏样本并优化规则
+# ============================================================
+
+class OptimizeFromNovelRequest(BaseModel):
+    novel_id: int
+    max_good: int = 3
+    max_bad: int = 3
+    blocks_per_novel: int = 5
+    max_bytes_per_block: int = 8000
+    genre: str = "玄幻"
+
+
+def _build_optimization_report(
+    good_results: List[Dict[str, Any]],
+    bad_results: List[Dict[str, Any]],
+    good_names: List[str],
+    bad_names: List[str],
+) -> OptimizationReport:
+    """从评测结果构建优化报告（与 analyze-rules 报告同构）。"""
+    dims = good_results[0]["dims"] if good_results else {}
+    by_dim = good_results[0]["by_dim"] if good_results else {}
+    rule_adjustments, dimension_analysis = _analyze_rule_discrimination(
+        good_results, bad_results, dims, by_dim
+    )
+    consistency_issues = _analyze_consistency(good_results, bad_results)
+    recommendations = _generate_recommendations(
+        rule_adjustments, dimension_analysis, consistency_issues
+    )
+    return OptimizationReport(
+        created_at=datetime.now().isoformat(),
+        total_samples=len(good_results) + len(bad_results),
+        good_novels=good_names,
+        bad_novels=bad_names,
+        rule_adjustments=rule_adjustments,
+        dimension_analysis=dimension_analysis,
+        consistency_issues=consistency_issues,
+        recommendations=recommendations,
+        raw_data={
+            "good_results": [{"filename": r["filename"], "blocks_count": len(r["blocks"])} for r in good_results],
+            "bad_results": [{"filename": r["filename"], "blocks_count": len(r["blocks"])} for r in bad_results],
+        },
+    )
+
+
+@router.post("/optimize-from-novel", response_model=OptimizationReport)
+async def optimize_rules_from_novel(
+    request: OptimizeFromNovelRequest,
+    current_user = Depends(get_current_user),
+):
+    """从当前小说章节自动采集好/坏样本并优化规则。
+
+    坏样本 = flagged 或 Rubric 低分(≤5)章节；好样本 = 未 flagged 且非低分章节。
+    """
+    from app.models.chapter import Chapter, ChapterStatus
+    from app.models.rubric import RubricEvaluation
+    from sqlalchemy import select
+    from app.core.database import get_session
+    from .evaluation import _get_llm_client
+
+    async with get_session() as db:
+        rows = (await db.execute(
+            select(Chapter).where(Chapter.novel_id == request.novel_id).order_by(Chapter.chapter_number)
+        )).scalars().all()
+        if not rows:
+            raise HTTPException(status_code=404, detail="该小说还没有章节，无法采集样本")
+
+        rubric_map: Dict[int, List[float]] = {}
+        evals = (await db.execute(
+            select(RubricEvaluation).where(RubricEvaluation.novel_id == request.novel_id)
+        )).scalars().all()
+        for e in evals:
+            rubric_map.setdefault(e.chapter_number, []).append(e.total_score or 0)
+
+    good, bad = [], []
+    for ch in rows:
+        content = ch.content or ""
+        if not content:
+            continue
+        label = f"第{ch.chapter_number}章·{ch.title or ''}"
+        scores = rubric_map.get(ch.chapter_number, [])
+        best = max(scores) if scores else None
+        is_bad = ch.status == ChapterStatus.FLAGGED or (best is not None and best <= 5.0)
+        is_good = ch.status != ChapterStatus.FLAGGED and (best is None or best >= 6.0)
+        if is_bad:
+            bad.append((label, content))
+        elif is_good:
+            good.append((label, content))
+
+    if not bad:
+        raise HTTPException(status_code=400, detail="没有 flagged 或低分章节可作为坏样本——先跑硬门禁/评测标出问题章节")
+    if not good:
+        raise HTTPException(status_code=400, detail="没有合格章节可作为好样本")
+
+    good = sorted(good, key=lambda x: -len(x[1]))[: request.max_good]
+    bad = sorted(bad, key=lambda x: -len(x[1]))[: request.max_bad]
+
+    try:
+        client, model_name = _get_llm_client()
+    except ValueError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"LLM 客户端初始化失败: {e}")
+
+    good_results, bad_results = [], []
+    for label, text in good:
+        r = await _run_sampled_evaluation(
+            text, request.blocks_per_novel, request.max_bytes_per_block,
+            request.genre, client, model_name, novel_name=label, novel_type="good",
+        )
+        r["filename"] = label
+        r["novel_type"] = "good"
+        good_results.append(r)
+    for label, text in bad:
+        r = await _run_sampled_evaluation(
+            text, request.blocks_per_novel, request.max_bytes_per_block,
+            request.genre, client, model_name, novel_name=label, novel_type="bad",
+        )
+        r["filename"] = label
+        r["novel_type"] = "bad"
+        bad_results.append(r)
+
+    logger.info(f"[optimize-from-novel] novel={request.novel_id} 完成: good={len(good_results)}, bad={len(bad_results)}")
+    return _build_optimization_report(
+        good_results, bad_results, [g[0] for g in good], [b[0] for b in bad],
+    )
+
+
+# ============================================================
+# 规则 CSV 备份/回滚（针对"应用优化"产生的 .backup_* 文件）
+# ============================================================
+
+class RuleBackupRestoreRequest(BaseModel):
+    filename: str
+
+
+@router.get("/rule-csv-backups")
+async def list_rule_csv_backups(
+    current_user = Depends(get_current_user),
+):
+    """列出"应用优化"生成的规则 CSV 备份。"""
+    from .evaluation import _find_rules_file
+    backend_dir = Path(__file__).resolve().parent.parent.parent.parent
+    project_dir = backend_dir.parent
+    rules_file = _find_rules_file(project_dir)
+    backups = []
+    if rules_file.exists():
+        for fp in sorted(rules_file.parent.glob(f"{rules_file.name}.backup_*")):
+            backups.append({
+                "name": fp.name,
+                "created_at": datetime.fromtimestamp(fp.stat().st_mtime).isoformat(),
+                "size": fp.stat().st_size,
+            })
+    return {"success": True, "count": len(backups), "backups": backups}
+
+
+@router.post("/rule-csv-backups/restore")
+async def restore_rule_csv_backup(
+    payload: RuleBackupRestoreRequest,
+    current_user = Depends(get_current_user),
+):
+    """用指定备份覆盖当前规则 CSV（恢复前先备份当前版本）。"""
+    from .evaluation import _find_rules_file
+    import shutil as _shutil
+
+    backend_dir = Path(__file__).resolve().parent.parent.parent.parent
+    project_dir = backend_dir.parent
+    rules_file = _find_rules_file(project_dir)
+    if not rules_file.exists():
+        raise HTTPException(status_code=404, detail="规则文件不存在")
+
+    backup_path = rules_file.parent / payload.filename
+    try:
+        backup_path.resolve().relative_to(rules_file.parent.resolve())
+    except ValueError:
+        raise HTTPException(status_code=400, detail="非法备份文件名")
+    if not backup_path.is_file():
+        raise HTTPException(status_code=404, detail=f"备份不存在: {payload.filename}")
+
+    # 恢复前把当前版本留作新备份，保证可逆
+    snapshot = rules_file.with_suffix(f".csv.backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}_pre_restore")
+    _shutil.copy2(rules_file, snapshot)
+    _shutil.copy2(backup_path, rules_file)
+    logger.info(f"[rule-backup] 已用 {payload.filename} 恢复规则文件，当前版本备份为 {snapshot.name}")
+    return {"success": True, "restored": payload.filename, "snapshot": snapshot.name}

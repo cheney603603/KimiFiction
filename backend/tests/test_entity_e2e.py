@@ -18,7 +18,7 @@ from typing import Dict, Optional
 from datetime import datetime
 
 # ─── 配置 ────────────────────────────────────────────────────
-BASE_URL = os.getenv("E2E_BASE_URL", "http://localhost:8000")
+BASE_URL = os.getenv("E2E_BASE_URL", "http://localhost:8080")
 API_PREFIX = "/api/v1"
 TEST_USER = {
     "username": f"e2e_test_{datetime.now().strftime('%m%d%H%M%S')}",

@@ -1,5 +1,5 @@
 import { useState, useRef, useEffect } from 'react'
-import { evaluationApi } from '../services/api'
+import { evaluationApi, novelApi, chapterApi, workflowApi } from '../services/api'
 
 // ─── 类型定义 ───────────────────────────────────────────────
 interface RuleDetail {
@@ -65,6 +65,39 @@ interface ReferenceNovel {
   size_kb: number
 }
 
+interface MyReferenceFile {
+  filename: string
+  name: string
+  size_bytes: number
+  size_kb: number
+}
+
+interface MyNovel {
+  id: number
+  title: string
+  genre?: string | null
+  status?: string | null
+}
+
+interface ChapterItem {
+  id: number
+  novel_id: number
+  chapter_number: number
+  title: string
+  word_count: number
+  status: string
+}
+
+interface ChapterEvalResult {
+  chapter_number: number
+  title: string
+  total_score: number
+  rank: string
+  api_calls: number
+  block_count: number
+  error?: string
+}
+
 // 历史记录类型
 interface HistoryItem {
   id: number
@@ -94,8 +127,9 @@ const STORAGE_KEY = 'kimi_evaluation_state'
 interface SavedState {
   result: SampledResult | null
   params: {
-    inputMode: 'file' | 'text'
+    inputMode: 'file' | 'text' | 'novel'
     selectedFile: string
+    selectedNovelId: number | null
     customText: string
     numBlocks: number
     maxBytesPerBlock: number
@@ -196,12 +230,28 @@ export function Evaluation() {
   const [expandedDim, setExpandedDim] = useState<Record<string, boolean>>({})
 
   // 恢复保存的参数
-  const [inputMode, setInputMode] = useState<'file' | 'text'>(savedState?.params?.inputMode || 'file')
+  const [inputMode, setInputMode] = useState<'file' | 'text' | 'novel'>(savedState?.params?.inputMode || 'file')
   const [selectedFile, setSelectedFile] = useState<string>(savedState?.params?.selectedFile || '')
+  const [selectedNovelId, setSelectedNovelId] = useState<number | null>(savedState?.params?.selectedNovelId || null)
   const [customText, setCustomText] = useState<string>(savedState?.params?.customText || '')
   const [numBlocks, setNumBlocks] = useState(savedState?.params?.numBlocks || 5)
   const [maxBytesPerBlock, setMaxBytesPerBlock] = useState(savedState?.params?.maxBytesPerBlock || 10000)
   const [genre, setGenre] = useState(savedState?.params?.genre || '玄幻')
+
+  // 我的语料（个人上传）
+  const [myReferences, setMyReferences] = useState<MyReferenceFile[]>([])
+  const [myRefsLoaded, setMyRefsLoaded] = useState(false)
+  const [uploading, setUploading] = useState(false)
+  const fileInputRef = useRef<HTMLInputElement | null>(null)
+
+  // 我的小说（章节评测）
+  const [myNovels, setMyNovels] = useState<MyNovel[]>([])
+  const [novelChapters, setNovelChapters] = useState<ChapterItem[]>([])
+  const [checkedChapters, setCheckedChapters] = useState<number[]>([])
+  const [chapterResults, setChapterResults] = useState<Record<number, ChapterEvalResult>>({})
+  const [novelRunning, setNovelRunning] = useState(false)
+  const [novelProgressText, setNovelProgressText] = useState('')
+  const [revisingChapter, setRevisingChapter] = useState<number | null>(null)
 
   // 历史记录状态
   const [history, setHistory] = useState<HistoryItem[]>([])
@@ -222,6 +272,88 @@ export function Evaluation() {
     } catch (e: any) {
       setError('加载参考小说失败：' + (e?.response?.data?.detail || e.message))
     }
+  }
+
+  // 加载我的语料（个人上传）
+  const loadMyReferences = async () => {
+    try {
+      const res = await evaluationApi.listMyReferences()
+      setMyReferences(res.files || [])
+      setMyRefsLoaded(true)
+    } catch (e: any) {
+      console.error('加载我的语料失败:', e)
+    }
+  }
+
+  // 上传我的语料
+  const handleUploadFile = async (file: File) => {
+    if (!file) return
+    const name = file.name.toLowerCase()
+    if (!name.endsWith('.txt') && !name.endsWith('.md')) {
+      setError('仅支持 .txt / .md 文本文件')
+      return
+    }
+    if (file.size > 5 * 1024 * 1024) {
+      setError('文件不能超过 5MB')
+      return
+    }
+    setUploading(true)
+    setError(null)
+    try {
+      await evaluationApi.uploadReference(file)
+      await loadMyReferences()
+    } catch (e: any) {
+      setError('上传失败：' + (e?.response?.data?.detail || e.message))
+    } finally {
+      setUploading(false)
+    }
+  }
+
+  // 删除我的语料
+  const handleDeleteMyReference = async (filename: string) => {
+    if (!window.confirm(`确定删除「${filename}」？`)) return
+    try {
+      await evaluationApi.deleteMyReference(filename)
+      if (selectedFile === `mine:${filename}`) setSelectedFile('')
+      await loadMyReferences()
+    } catch (e: any) {
+      setError('删除失败：' + (e?.response?.data?.detail || e.message))
+    }
+  }
+
+  // 加载我的小说列表
+  const loadMyNovels = async () => {
+    try {
+      const res: any = await novelApi.list({ limit: 100 })
+      setMyNovels(res.items || res || [])
+    } catch (e: any) {
+      console.error('加载我的小说失败:', e)
+    }
+  }
+
+  // 加载小说章节
+  const loadNovelChapters = async (novelId: number) => {
+    setNovelChapters([])
+    setCheckedChapters([])
+    setChapterResults({})
+    try {
+      const res: any = await chapterApi.list(novelId, { limit: 200 })
+      const items: ChapterItem[] = res.items || []
+      setNovelChapters(items)
+      // 默认勾选非 flagged 章节（坏章节留给用户手动决定）
+      setCheckedChapters(
+        items.filter(c => c.status !== 'flagged').map(c => c.id)
+      )
+    } catch (e: any) {
+      setError('加载章节失败：' + (e?.response?.data?.detail || e.message))
+    }
+  }
+
+  // 切换章节勾选
+  const toggleChapter = (id: number) => {
+    setCheckedChapters(prev =>
+      prev.includes(id) ? prev.filter(c => c !== id) : [...prev, id]
+    )
   }
 
   // 加载历史记录
@@ -262,9 +394,11 @@ export function Evaluation() {
     }
   }
 
-  // 组件挂载时加载历史记录
+  // 组件挂载时加载历史记录、我的语料与我的小说
   useEffect(() => {
     loadHistory(1)
+    loadMyReferences()
+    loadMyNovels()
   }, [])
 
   // 获取评测文本
@@ -277,15 +411,219 @@ export function Evaluation() {
       return customText.trim()
     }
     if (!selectedFile) {
-      setError('请选择一个参考小说文件')
+      setError('请选择一个文件')
       return null
     }
     try {
-      const data = await evaluationApi.getReferenceContent(selectedFile)
+      const isMine = selectedFile.startsWith('mine:')
+      const filename = isMine ? selectedFile.slice(5) : selectedFile
+      const data = isMine
+        ? await evaluationApi.getMyReferenceContent(filename)
+        : await evaluationApi.getReferenceContent(selectedFile)
       return data.content
     } catch (e: any) {
       setError('读取文件失败：' + e.message)
       return null
+    }
+  }
+
+  // 流式运行采样评测（单一文本块集合），逐事件回调
+  const runSampledStream = async (
+    text: string,
+    onEvent: (event: any) => void,
+    signal?: AbortSignal
+  ): Promise<SampledResult> => {
+    const token = localStorage.getItem('access_token')
+    const response = await fetch('/api/v1/training/evaluation/run-sampled', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Authorization': token ? `Bearer ${token}` : '',
+      },
+      body: JSON.stringify({
+        text,
+        num_blocks: numBlocks,
+        max_bytes_per_block: maxBytesPerBlock,
+        eval_type: 'llm',
+        genre,
+        stream: true,
+      }),
+      signal,
+    })
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}))
+      throw new Error(errorData.detail || `HTTP ${response.status}`)
+    }
+
+    const reader = response.body?.getReader()
+    if (!reader) throw new Error('无法读取响应流')
+
+    const decoder = new TextDecoder()
+    let buffer = ''
+    let finalResult: SampledResult | null = null
+
+    while (true) {
+      const { done, value } = await reader.read()
+      if (done) break
+
+      buffer += decoder.decode(value, { stream: true })
+      const lines = buffer.split('\n')
+      buffer = lines.pop() || ''
+
+      for (const line of lines) {
+        if (!line.trim()) continue
+        try {
+          const event = JSON.parse(line)
+          onEvent(event)
+          if (event.type === 'result') {
+            finalResult = event.data
+          } else if (event.type === 'error') {
+            throw new Error(event.error || '评测过程中出错')
+          }
+        } catch (e: any) {
+          if (e?.message !== '评测过程中出错') console.error('解析事件失败:', line, e)
+        }
+      }
+    }
+
+    if (!finalResult) throw new Error('评测未完成，未收到结果')
+    return finalResult
+  }
+
+  // 开始评测（流式）
+  const handleRun = async () => {
+    setError(null)
+    setResult(null)
+    setProgress(null)
+    setExpandedBlock(null)
+    setExpandedDim({})
+
+    const text = await getEvalText()
+    if (!text) return
+
+    setRunning(true)
+    abortControllerRef.current = new AbortController()
+
+    try {
+      const finalResult = await runSampledStream(text, (event) => {
+        switch (event.type) {
+          case 'init':
+            setProgress({
+              currentBlock: 0,
+              totalBlocks: event.total_blocks || numBlocks,
+              apiCalls: 0,
+              status: '初始化完成，开始评测...',
+            })
+            break
+          case 'progress':
+            setProgress({
+              currentBlock: event.current_block || 0,
+              totalBlocks: event.total_blocks || numBlocks,
+              apiCalls: event.api_calls || 0,
+              status: event.message || `正在评测第 ${event.current_block} 块...`,
+            })
+            break
+          case 'result':
+            setProgress(prev => prev ? { ...prev, status: '评测完成！' } : null)
+            break
+        }
+      }, abortControllerRef.current.signal)
+
+      setResult(finalResult)
+      loadHistory(1)
+    } catch (e: any) {
+      if (e.name === 'AbortError') {
+        setError('评测已取消')
+      } else {
+        setError(e.message || '请求失败')
+      }
+    } finally {
+      setRunning(false)
+      setProgress(null)
+      abortControllerRef.current = null
+    }
+  }
+
+  // 批量评测我的小说章节
+  const handleRunNovel = async () => {
+    if (!selectedNovelId) {
+      setError('请先选择小说')
+      return
+    }
+    const chapterRows = novelChapters.filter(c => checkedChapters.includes(c.id))
+    if (chapterRows.length === 0) {
+      setError('请至少勾选一个章节')
+      return
+    }
+
+    setError(null)
+    setNovelRunning(true)
+    setChapterResults({})
+    setNovelProgressText('')
+
+    const estimatedCalls = chapterRows.length * numBlocks * 8 + chapterRows.length
+    setNovelProgressText(`预计约 ${estimatedCalls} 次 API 调用，开始逐章评测...`)
+
+    const results: Record<number, ChapterEvalResult> = {}
+    for (let i = 0; i < chapterRows.length; i++) {
+      const ch = chapterRows[i]
+      setNovelProgressText(`正在评测第 ${ch.chapter_number} 章「${ch.title}」(${i + 1}/${chapterRows.length})...`)
+      try {
+        const detail: any = await chapterApi.get(ch.id)
+        const content: string = detail.content || ''
+        if (!content.trim()) {
+          results[ch.chapter_number] = { chapter_number: ch.chapter_number, title: ch.title, total_score: 0, rank: '-', api_calls: 0, block_count: 0, error: '章节内容为空' }
+          continue
+        }
+        const finalResult = await runSampledStream(content, (event) => {
+          if (event.type === 'progress' && event.message) {
+            setNovelProgressText(`第 ${ch.chapter_number} 章: ${event.message}`)
+          }
+        })
+        results[ch.chapter_number] = {
+          chapter_number: ch.chapter_number,
+          title: ch.title,
+          total_score: finalResult.total_score,
+          rank: finalResult.rank,
+          api_calls: finalResult.api_calls,
+          block_count: finalResult.sampling?.sampled_blocks || 0,
+        }
+      } catch (e: any) {
+        results[ch.chapter_number] = {
+          chapter_number: ch.chapter_number,
+          title: ch.title,
+          total_score: 0,
+          rank: '-',
+          api_calls: 0,
+          block_count: 0,
+          error: e.message || '评测失败',
+        }
+      }
+      setChapterResults({ ...results })
+    }
+    setNovelRunning(false)
+    setNovelProgressText('评测完成')
+  }
+
+  // 按评测意见改写章节
+  const handleRewriteChapter = async (ch: ChapterItem) => {
+    if (!selectedNovelId) return
+    if (!window.confirm(`按评测意见重写第 ${ch.chapter_number} 章「${ch.title}」？`)) return
+    setRevisingChapter(ch.chapter_number)
+    setError(null)
+    try {
+      const res = await workflowApi.reviseChapter(selectedNovelId, {
+        chapter_number: ch.chapter_number,
+        feedback: '根据八维评测指出的问题重写本章，保留情节推进，修正低分维度。',
+        scope: 'chapter',
+      })
+      const taskId = (res as any)?.task_id
+      setNovelProgressText(taskId ? `改写任务已提交: ${taskId}` : '改写任务已提交')
+    } catch (e: any) {
+      setError('改写失败：' + (e?.response?.data?.detail || e.message))
+    } finally {
+      setRevisingChapter(null)
     }
   }
 
@@ -305,6 +643,7 @@ export function Evaluation() {
       params: {
         inputMode,
         selectedFile,
+        selectedNovelId,
         customText,
         numBlocks,
         maxBytesPerBlock,
@@ -312,122 +651,12 @@ export function Evaluation() {
       },
       timestamp: Date.now(),
     })
-  }, [result, inputMode, selectedFile, customText, numBlocks, maxBytesPerBlock, genre])
+  }, [result, inputMode, selectedFile, selectedNovelId, customText, numBlocks, maxBytesPerBlock, genre])
 
   // 清除历史结果
   const handleClearResult = () => {
     setResult(null)
     clearState()
-  }
-
-  // 开始评测（流式）
-  const handleRun = async () => {
-    setError(null)
-    setResult(null)
-    setProgress(null)
-    setExpandedBlock(null)
-    setExpandedDim({})
-
-    const text = await getEvalText()
-    if (!text) return
-
-    setRunning(true)
-    abortControllerRef.current = new AbortController()
-
-    try {
-      const token = localStorage.getItem('access_token')
-      const response = await fetch('/api/v1/training/evaluation/run-sampled', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'Authorization': token ? `Bearer ${token}` : '',
-        },
-        body: JSON.stringify({
-          text,
-          num_blocks: numBlocks,
-          max_bytes_per_block: maxBytesPerBlock,
-          eval_type: 'llm',
-          genre,
-          stream: true,
-        }),
-        signal: abortControllerRef.current.signal,
-      })
-
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}))
-        throw new Error(errorData.detail || `HTTP ${response.status}`)
-      }
-
-      const reader = response.body?.getReader()
-      if (!reader) {
-        throw new Error('无法读取响应流')
-      }
-
-      const decoder = new TextDecoder()
-      let buffer = ''
-      let finalResult: SampledResult | null = null
-
-      while (true) {
-        const { done, value } = await reader.read()
-        if (done) break
-
-        buffer += decoder.decode(value, { stream: true })
-        const lines = buffer.split('\n')
-        buffer = lines.pop() || ''
-
-        for (const line of lines) {
-          if (!line.trim()) continue
-          try {
-            const event = JSON.parse(line)
-            switch (event.type) {
-              case 'init':
-                setProgress({
-                  currentBlock: 0,
-                  totalBlocks: event.total_blocks || numBlocks,
-                  apiCalls: 0,
-                  status: '初始化完成，开始评测...',
-                })
-                break
-              case 'progress':
-                setProgress({
-                  currentBlock: event.current_block || 0,
-                  totalBlocks: event.total_blocks || numBlocks,
-                  apiCalls: event.api_calls || 0,
-                  status: event.message || `正在评测第 ${event.current_block} 块...`,
-                })
-                break
-              case 'result':
-                finalResult = event.data
-                setProgress(prev => prev ? { ...prev, status: '评测完成！' } : null)
-                break
-              case 'error':
-                throw new Error(event.error || '评测过程中出错')
-            }
-          } catch (e) {
-            console.error('解析事件失败:', line, e)
-          }
-        }
-      }
-
-      if (finalResult) {
-        setResult(finalResult)
-        // 结果已自动保存到 localStorage
-        // 刷新历史记录列表
-        loadHistory(1)
-      } else {
-        setError('评测未完成，未收到结果')
-      }
-    } catch (e: any) {
-      if (e.name === 'AbortError') {
-        setError('评测已取消')
-      } else {
-        setError(e.message || '请求失败')
-      }
-    } finally {
-      setRunning(false)
-      setProgress(null)
-      abortControllerRef.current = null
-    }
   }
 
   // 取消评测
@@ -467,8 +696,8 @@ export function Evaluation() {
           <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">评测文本来源</h2>
 
           {/* 模式切换 */}
-          <div className="flex gap-2">
-            {(['file', 'text'] as const).map(mode => (
+          <div className="flex gap-2 flex-wrap">
+            {(['file', 'novel', 'text'] as const).map(mode => (
               <button
                 key={mode}
                 onClick={() => setInputMode(mode)}
@@ -478,32 +707,184 @@ export function Evaluation() {
                     : 'bg-gray-800 text-gray-400 hover:bg-gray-700'
                 }`}
               >
-                {mode === 'file' ? '📁 参考小说' : '✏️ 粘贴文本'}
+                {mode === 'file' ? '📁 参考语料' : mode === 'novel' ? '📚 我的小说' : '✏️ 粘贴文本'}
               </button>
             ))}
           </div>
 
           {inputMode === 'file' ? (
-            <div className="space-y-2">
-              <button
-                onClick={loadNovels}
-                className="text-xs text-indigo-400 hover:text-indigo-300 underline"
-              >
-                {novelsLoaded ? `已加载 ${novels.length} 部小说` : '点击加载参考小说列表'}
-              </button>
-              {novels.length > 0 && (
-                <select
-                  value={selectedFile}
-                  onChange={e => setSelectedFile(e.target.value)}
-                  className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-indigo-500"
+            <div className="space-y-4">
+              {/* 服务端参考小说 */}
+              <div className="space-y-2">
+                <p className="text-xs text-gray-500">服务端参考小说（管理员预置）</p>
+                <button
+                  onClick={loadNovels}
+                  className="text-xs text-indigo-400 hover:text-indigo-300 underline"
                 >
-                  <option value="">— 选择小说文件 —</option>
-                  {novels.map(n => (
-                    <option key={n.filename} value={n.filename}>
-                      {n.filename}（{n.size_kb} KB）
+                  {novelsLoaded ? `已加载 ${novels.length} 部小说` : '点击加载参考小说列表'}
+                </button>
+                {novels.length > 0 && (
+                  <select
+                    value={selectedFile.startsWith('mine:') ? '' : selectedFile}
+                    onChange={e => setSelectedFile(e.target.value)}
+                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-indigo-500"
+                  >
+                    <option value="">— 选择小说文件 —</option>
+                    {novels.map(n => (
+                      <option key={n.filename} value={n.filename}>
+                        {n.filename}（{n.size_kb} KB）
+                      </option>
+                    ))}
+                  </select>
+                )}
+              </div>
+
+              {/* 我的语料（个人上传） */}
+              <div className="border-t border-gray-800 pt-4 space-y-2">
+                <div className="flex items-center justify-between">
+                  <p className="text-xs text-gray-500">我的语料（个人上传，仅自己可见）</p>
+                  <button
+                    onClick={() => fileInputRef.current?.click()}
+                    disabled={uploading}
+                    className="text-xs px-3 py-1 bg-gray-800 hover:bg-gray-700 text-gray-300 rounded-lg disabled:opacity-50"
+                  >
+                    {uploading ? '上传中...' : '⬆ 上传 .txt/.md'}
+                  </button>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept=".txt,.md"
+                    className="hidden"
+                    onChange={e => {
+                      const f = e.target.files?.[0]
+                      if (f) handleUploadFile(f)
+                      e.target.value = ''
+                    }}
+                  />
+                </div>
+                {myRefsLoaded && myReferences.length === 0 && (
+                  <p className="text-xs text-gray-600">还没有上传语料，可上传自己的小说/片段用于评测</p>
+                )}
+                {myReferences.length > 0 && (
+                  <select
+                    value={selectedFile.startsWith('mine:') ? selectedFile : ''}
+                    onChange={e => setSelectedFile(e.target.value)}
+                    className="w-full bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-indigo-500"
+                  >
+                    <option value="">— 选择我的语料 —</option>
+                    {myReferences.map(f => (
+                      <option key={f.filename} value={`mine:${f.filename}`}>
+                        {f.filename}（{f.size_kb} KB）
+                      </option>
+                    ))}
+                  </select>
+                )}
+                {myReferences.length > 0 && (
+                  <div className="space-y-1 max-h-32 overflow-y-auto">
+                    {myReferences.map(f => (
+                      <div key={f.filename} className="flex items-center justify-between text-xs text-gray-400 py-0.5">
+                        <span className="truncate pr-2">{f.filename}</span>
+                        <button
+                          onClick={() => handleDeleteMyReference(f.filename)}
+                          className="text-red-400 hover:text-red-300 shrink-0"
+                        >
+                          ✕ 删除
+                        </button>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : inputMode === 'novel' ? (
+            <div className="space-y-3">
+              {/* 选择我的小说 */}
+              <div className="flex items-center gap-3">
+                <select
+                  value={selectedNovelId ?? ''}
+                  onChange={async e => {
+                    const id = Number(e.target.value)
+                    setSelectedNovelId(id || null)
+                    if (id) await loadNovelChapters(id)
+                  }}
+                  className="flex-1 bg-gray-800 border border-gray-700 rounded-lg px-3 py-2 text-sm text-gray-200 focus:outline-none focus:border-indigo-500"
+                >
+                  <option value="">— 选择我的小说 —</option>
+                  {myNovels.map(n => (
+                    <option key={n.id} value={n.id}>
+                      {n.title}{n.genre ? `（${n.genre}）` : ''}
                     </option>
                   ))}
                 </select>
+                <button
+                  onClick={() => { loadMyNovels(); if (myNovels.length === 0) loadMyReferences() }}
+                  className="text-xs text-indigo-400 hover:text-indigo-300 underline shrink-0"
+                >
+                  刷新小说列表
+                </button>
+              </div>
+
+              {/* 章节选择表 */}
+              {novelChapters.length > 0 && (
+                <div className="border border-gray-800 rounded-lg overflow-hidden">
+                  <div className="flex items-center justify-between px-3 py-2 bg-gray-800/50 text-xs text-gray-400">
+                    <span>勾选要评测的章节（{checkedChapters.length}/{novelChapters.length}）</span>
+                    <button
+                      onClick={() => setCheckedChapters(novelChapters.filter(c => c.status !== 'flagged').map(c => c.id))}
+                      className="text-indigo-400 hover:text-indigo-300"
+                    >
+                      重选（默认跳过 flagged）
+                    </button>
+                  </div>
+                  <div className="max-h-64 overflow-y-auto">
+                    <table className="w-full text-sm">
+                      <thead>
+                        <tr className="text-gray-500 border-b border-gray-800 text-xs">
+                          <th className="text-left py-2 px-3 w-8"></th>
+                          <th className="text-left py-2 px-2">章节</th>
+                          <th className="text-right py-2 px-3">字数</th>
+                          <th className="text-center py-2 px-3">状态</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {novelChapters.map(ch => {
+                          const flagged = ch.status === 'flagged'
+                          return (
+                            <tr key={ch.id} className="border-b border-gray-800/50 hover:bg-gray-800/30">
+                              <td className="py-2 px-3">
+                                <input
+                                  type="checkbox"
+                                  checked={checkedChapters.includes(ch.id)}
+                                  onChange={() => toggleChapter(ch.id)}
+                                  className="rounded border-gray-700 bg-gray-800"
+                                />
+                              </td>
+                              <td className="py-2 px-2 text-gray-300">
+                                <span className="font-mono text-xs text-gray-500">第{ch.chapter_number}章</span> {ch.title}
+                              </td>
+                              <td className="py-2 px-3 text-right text-gray-500">{ch.word_count}</td>
+                              <td className="py-2 px-3 text-center">
+                                {flagged ? (
+                                  <span className="text-xs px-2 py-0.5 bg-red-900 text-red-400 rounded">flagged</span>
+                                ) : (
+                                  <span className="text-xs px-2 py-0.5 bg-green-900 text-green-400 rounded">{ch.status}</span>
+                                )}
+                              </td>
+                            </tr>
+                          )
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                </div>
+              )}
+
+              {/* 成本估算 */}
+              {novelChapters.length > 0 && (
+                <p className="text-xs text-gray-500">
+                  预计 API 调用 ≈ {checkedChapters.length * numBlocks * 8 + checkedChapters.length} 次
+                  （{checkedChapters.length} 章 × {numBlocks} 块 × 8 维 + 汇总）
+                </p>
               )}
             </div>
           ) : (
@@ -587,15 +968,19 @@ export function Evaluation() {
         {/* ── 运行按钮 ── */}
         <div className="flex items-center gap-4">
           <button
-            onClick={handleRun}
-            disabled={running}
+            onClick={inputMode === 'novel' ? handleRunNovel : handleRun}
+            disabled={running || novelRunning}
             className={`px-8 py-3 rounded-xl font-semibold text-base transition-all ${
-              running
+              running || novelRunning
                 ? 'bg-gray-700 text-gray-500 cursor-not-allowed'
                 : 'bg-indigo-600 hover:bg-indigo-500 text-white shadow-lg shadow-indigo-900/40'
             }`}
           >
-            {running ? '⏳ 评测中...' : result ? '🔄 重新评测' : '🚀 开始评测'}
+            {running || novelRunning
+              ? '⏳ 评测中...'
+              : inputMode === 'novel'
+                ? Object.keys(chapterResults).length > 0 ? '🔄 重新批量评测' : '🚀 批量评测章节'
+                : result ? '🔄 重新评测' : '🚀 开始评测'}
           </button>
           {running && (
             <button
@@ -605,7 +990,7 @@ export function Evaluation() {
               取消
             </button>
           )}
-          {result && !running && (
+          {result && !running && !novelRunning && inputMode !== 'novel' && (
             <button
               onClick={handleClearResult}
               className="px-4 py-2 rounded-lg text-sm bg-gray-800 text-gray-400 hover:bg-gray-700 transition-colors"
@@ -615,8 +1000,18 @@ export function Evaluation() {
           )}
         </div>
 
+        {/* ── 小说模式进度 ── */}
+        {novelRunning && (
+          <div className="bg-indigo-950/30 border border-indigo-800/50 rounded-xl p-4">
+            <div className="flex items-center gap-3">
+              <span className="animate-spin inline-block w-4 h-4 border-2 border-indigo-400 border-t-transparent rounded-full" />
+              <span className="text-sm text-indigo-300">{novelProgressText}</span>
+            </div>
+          </div>
+        )}
+
         {/* ── 历史结果提示 ── */}
-        {result && !running && (
+        {result && !running && inputMode !== 'novel' && (
           <div className="bg-green-950/30 border border-green-800/50 rounded-lg p-3">
             <div className="flex items-center gap-2 text-sm text-green-400">
               <span>✓</span>
@@ -662,8 +1057,86 @@ export function Evaluation() {
           </div>
         )}
 
+        {/* ── 小说章节评测结果 ── */}
+        {inputMode === 'novel' && Object.keys(chapterResults).length > 0 && !novelRunning && (
+          <div className="bg-gray-900 rounded-xl border border-gray-800 overflow-hidden">
+            <div className="flex items-center justify-between px-5 py-4 border-b border-gray-800">
+              <h2 className="text-sm font-semibold text-gray-300 uppercase tracking-wider">章节评测结果</h2>
+              <span className="text-xs text-gray-500">{novelProgressText}</span>
+            </div>
+            <div className="overflow-x-auto">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="text-gray-500 border-b border-gray-800 text-xs">
+                    <th className="text-left py-2 px-3">章节</th>
+                    <th className="text-center py-2 px-3">得分</th>
+                    <th className="text-center py-2 px-3">评级</th>
+                    <th className="text-center py-2 px-3">采样块</th>
+                    <th className="text-center py-2 px-3">API 调用</th>
+                    <th className="text-center py-2 px-3">操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {novelChapters
+                    .filter(ch => chapterResults[ch.chapter_number])
+                    .map(ch => {
+                      const r = chapterResults[ch.chapter_number]
+                      const failed = r.error !== undefined || r.total_score < 6
+                      return (
+                        <tr key={ch.id} className="border-b border-gray-800/50 hover:bg-gray-800/30">
+                          <td className="py-2 px-3">
+                            <span className="font-mono text-xs text-gray-500">第{ch.chapter_number}章</span>{' '}
+                            <span className="text-gray-300">{ch.title}</span>
+                          </td>
+                          <td className="py-2 px-3 text-center">
+                            {r.error ? (
+                              <span className="text-red-400">—</span>
+                            ) : (
+                              <span className={`text-base font-bold font-mono ${scoreColor(r.total_score / 10)}`}>
+                                {r.total_score.toFixed(1)}
+                              </span>
+                            )}
+                          </td>
+                          <td className="py-2 px-3 text-center">
+                            {r.error ? (
+                              <span className="text-xs text-red-400">失败</span>
+                            ) : (
+                              <span className={`font-mono font-bold ${rankColor[r.rank] || 'text-gray-400'}`}>{r.rank}</span>
+                            )}
+                          </td>
+                          <td className="py-2 px-3 text-center text-gray-500">{r.error ? '-' : r.block_count}</td>
+                          <td className="py-2 px-3 text-center text-gray-500">{r.error ? '-' : r.api_calls}</td>
+                          <td className="py-2 px-3 text-center">
+                            {r.error ? (
+                              <span className="text-xs text-gray-600">{r.error}</span>
+                            ) : (
+                              <button
+                                onClick={() => handleRewriteChapter(ch)}
+                                disabled={revisingChapter === ch.chapter_number}
+                                className={`text-xs px-3 py-1 rounded-lg transition-colors ${
+                                  failed
+                                    ? 'bg-amber-600 hover:bg-amber-500 text-white'
+                                    : 'bg-gray-800 hover:bg-gray-700 text-gray-300'
+                                } disabled:opacity-50`}
+                              >
+                                {revisingChapter === ch.chapter_number ? '提交中...' : '✍️ 按意见改写'}
+                              </button>
+                            )}
+                          </td>
+                        </tr>
+                      )
+                    })}
+                </tbody>
+              </table>
+            </div>
+            <div className="px-5 py-3 text-xs text-gray-500">
+              得分 &lt; 6 或 flagged 的章节建议用「按意见改写」重跑，再重新评测验证。
+            </div>
+          </div>
+        )}
+
         {/* ── 结果区 ── */}
-        {result && (
+        {result && inputMode !== 'novel' && (
           <div className="space-y-6">
 
             {/* 总分卡片 */}

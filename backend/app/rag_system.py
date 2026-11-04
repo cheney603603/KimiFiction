@@ -213,7 +213,7 @@ class HybridRetriever:
     KEYWORD_WEIGHT = 0.4
     
     def __init__(self):
-        self.retriever.embedding_service = EmbeddingService()
+        self.embedding_service = EmbeddingService()
     
     async def retrieve(
         self,
@@ -267,7 +267,7 @@ class HybridRetriever:
         top_k: int
     ) -> List[TextChunk]:
         try:
-            query_vector = await self.retriever.embedding_service.get_embedding(query)
+            query_vector = await self.embedding_service.get_embedding(query)
             if not query_vector:
                 return []
             

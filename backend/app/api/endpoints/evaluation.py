@@ -2,21 +2,54 @@
 八维 LLM Rubric 评测 API
 （从原 training.py 拆分：RL 体系已移除，评测体系保留，§6.2）
 
-提供八维 Rubric 评测 / 参考作品评测 / 采样评测 / 章节评测 / 评测历史。
-路径沿用 /training/evaluation/*，前端评测页无需改动。
+提供八维 Rubric 评测 / 参考作品评测 / 采样评测 / 章节评测 / 评测历史 /
+个人语料上传管理（按用户隔离存储）。
+路径沿用 /training/evaluation/*。
 """
 import asyncio
 import json
+import re
+import uuid
 from pathlib import Path
 from typing import Any, Dict, List, Optional
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, File, HTTPException, UploadFile
 from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 from loguru import logger
 
-from app.core.auth import get_current_user
+from app.core.auth import get_current_user, require_auth
 
 router = APIRouter(prefix="/training", tags=["training"])
+
+# 个人语料存储根目录：backend/data/user_uploads/{user_id}/
+_UPLOAD_ROOT = Path(__file__).resolve().parent.parent.parent.parent / "data" / "user_uploads"
+_MAX_UPLOAD_BYTES = 5 * 1024 * 1024  # 5MB
+
+
+def _user_upload_dir(user_id: int) -> Path:
+    return _UPLOAD_ROOT / str(user_id)
+
+
+def _safe_filename(name: str) -> str:
+    """文件名消毒：保留中文/字母数字，前缀 uuid 防碰撞与穿越。"""
+    base = re.sub(r"[^\w一-鿿.\-]", "_", Path(name or "").name).strip("._")
+    if not base:
+        base = "upload.txt"
+    if not base.lower().endswith((".txt", ".md")):
+        base += ".txt"
+    return f"{uuid.uuid4().hex[:8]}_{base}"
+
+
+def _guard_user_path(user_dir: Path, filename: str) -> Path:
+    """路径防穿越：确保解析后的路径仍在本用户目录内。"""
+    file_path = (user_dir / filename).resolve()
+    try:
+        file_path.relative_to(user_dir.resolve())
+    except ValueError:
+        raise HTTPException(status_code=400, detail="非法文件名")
+    if not file_path.is_file():
+        raise HTTPException(status_code=404, detail="文件不存在")
+    return file_path
 
 
 def _find_rules_file(project_dir: Path) -> Path:
@@ -29,6 +62,96 @@ def _find_rules_file(project_dir: Path) -> Path:
         if c.exists():
             return c
     return candidates[0]
+
+
+# ============================================================
+# 个人语料上传管理（按用户隔离）
+# ============================================================
+
+@router.post("/evaluation/upload", response_model=Dict[str, Any])
+async def upload_reference_text(
+    file: UploadFile = File(...),
+    current_user: dict = Depends(require_auth),
+):
+    """上传个人参考文本（.txt/.md，≤5MB，UTF-8），按用户隔离存储。"""
+    filename = file.filename or ""
+    if not filename.lower().endswith((".txt", ".md")):
+        raise HTTPException(status_code=400, detail="仅支持 .txt / .md 文本文件")
+
+    content = await file.read()
+    size = len(content)
+    if size > _MAX_UPLOAD_BYTES:
+        raise HTTPException(status_code=400, detail=f"文件过大（限 {_MAX_UPLOAD_BYTES // 1024 // 1024}MB）")
+    if not content.strip():
+        raise HTTPException(status_code=400, detail="文件内容为空")
+
+    try:
+        text = content.decode("utf-8")
+    except UnicodeDecodeError:
+        raise HTTPException(status_code=400, detail="仅支持 UTF-8 编码文本")
+
+    user_dir = _user_upload_dir(current_user["id"])
+    user_dir.mkdir(parents=True, exist_ok=True)
+    stored = _safe_filename(filename)
+    (user_dir / stored).write_text(text, encoding="utf-8")
+
+    logger.info(f"[Upload] user={current_user['id']} uploaded {stored} ({size} bytes)")
+    return {
+        "success": True,
+        "filename": stored,
+        "size_bytes": size,
+        "char_count": len(text),
+    }
+
+
+@router.get("/evaluation/my-references", response_model=Dict[str, Any])
+async def list_my_references(
+    current_user: dict = Depends(require_auth),
+):
+    """列出当前用户的语料文件（仅元数据）。"""
+    user_dir = _user_upload_dir(current_user["id"])
+    files = []
+    if user_dir.exists():
+        for fp in sorted(user_dir.iterdir()):
+            if fp.is_file() and fp.suffix.lower() in (".txt", ".md"):
+                size = fp.stat().st_size
+                files.append({
+                    "filename": fp.name,
+                    "name": fp.stem,
+                    "size_bytes": size,
+                    "size_kb": round(size / 1024, 1),
+                })
+    return {"success": True, "count": len(files), "files": files}
+
+
+@router.get("/evaluation/my-reference/{filename}", response_model=Dict[str, Any])
+async def get_my_reference(
+    filename: str,
+    current_user: dict = Depends(require_auth),
+):
+    """读取当前用户的语料文件内容。"""
+    user_dir = _user_upload_dir(current_user["id"])
+    file_path = _guard_user_path(user_dir, filename)
+    content = file_path.read_text(encoding="utf-8")
+    return {
+        "success": True,
+        "filename": filename,
+        "content": content,
+        "char_count": len(content),
+    }
+
+
+@router.delete("/evaluation/my-reference/{filename}", response_model=Dict[str, Any])
+async def delete_my_reference(
+    filename: str,
+    current_user: dict = Depends(require_auth),
+):
+    """删除当前用户的语料文件。"""
+    user_dir = _user_upload_dir(current_user["id"])
+    file_path = _guard_user_path(user_dir, filename)
+    file_path.unlink()
+    logger.info(f"[Upload] user={current_user['id']} deleted {filename}")
+    return {"success": True, "deleted": filename}
 
 
 class EvaluationRequest(BaseModel):

@@ -261,7 +261,7 @@ export const workflowApi = {
   
   pause: (novelId: number) =>
     api.post(`/workflow/pause/${novelId}`),
-  
+
   resume: (novelId: number) =>
     api.post(`/workflow/resume/${novelId}`),
   
@@ -491,6 +491,19 @@ export const evaluationApi = {
   // 获取单条历史记录详情
   getHistoryDetail: (historyId: number) =>
     api.get(`/training/evaluation/history/${historyId}`),
+  // ── 我的语料（个人上传，按用户隔离） ──
+  uploadReference: (file: File) => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return api.post('/training/evaluation/upload', formData, {
+      headers: { 'Content-Type': 'multipart/form-data' },
+    })
+  },
+  listMyReferences: () => api.get('/training/evaluation/my-references'),
+  getMyReferenceContent: (filename: string) =>
+    api.get(`/training/evaluation/my-reference/${encodeURIComponent(filename)}`),
+  deleteMyReference: (filename: string) =>
+    api.delete(`/training/evaluation/my-reference/${encodeURIComponent(filename)}`),
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -653,4 +666,19 @@ export const evaluationOptimizerApi = {
   // 恢复备份
   restoreBackup: (data: { backup_name: string }) =>
     api.post('/training/evaluation/optimize-rules/restore', data),
+
+  // ── 从我的小说章节自动采集样本并优化 ──
+  optimizeFromNovel: (data: {
+    novel_id: number
+    max_good?: number
+    max_bad?: number
+    blocks_per_novel?: number
+    max_bytes_per_block?: number
+    genre?: string
+  }) => api.post('/training/evaluation/optimize-from-novel', data),
+
+  // 规则 CSV 备份（应用优化产生的 .backup_* 文件）与回滚
+  listRuleCsvBackups: () => api.get('/training/evaluation/rule-csv-backups'),
+  restoreRuleCsvBackup: (filename: string) =>
+    api.post('/training/evaluation/rule-csv-backups/restore', { filename }),
 }
