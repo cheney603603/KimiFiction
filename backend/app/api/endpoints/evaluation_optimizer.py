@@ -118,7 +118,7 @@ async def _run_sampled_evaluation(
         current_novel_idx: 当前小说序号（用于进度显示）
         total_novels: 总小说数（用于进度显示）
     """
-    from .training import _split_into_blocks, _sample_blocks, _load_rules_and_dims
+    from .evaluation import _split_into_blocks, _sample_blocks, _load_rules_and_dims
     
     backend_dir = Path(__file__).resolve().parent.parent.parent.parent
     project_dir = backend_dir.parent
@@ -669,7 +669,7 @@ async def analyze_evaluation_rules(
         "genre": "玄幻"
     }
     """
-    from .training import _get_llm_client
+    from .evaluation import _get_llm_client
     
     backend_dir = Path(__file__).resolve().parent.parent.parent.parent
     project_dir = backend_dir.parent
@@ -786,7 +786,7 @@ async def analyze_evaluation_rules_stream(
     from fastapi.responses import StreamingResponse
     
     async def generate():
-        from .training import _get_llm_client
+        from .evaluation import _get_llm_client
         import asyncio
         
         backend_dir = Path(__file__).resolve().parent.parent.parent.parent
@@ -1253,8 +1253,9 @@ async def apply_optimization(
     # 获取规则文件路径
     backend_dir = Path(__file__).resolve().parent.parent.parent.parent
     project_dir = backend_dir.parent
-    rules_file = project_dir / "evaluate_rules_llm.csv"
-    
+    from .evaluation import _find_rules_file
+    rules_file = _find_rules_file(project_dir)
+
     if not rules_file.exists():
         raise HTTPException(status_code=404, detail="规则文件不存在")
     
@@ -1350,7 +1351,7 @@ async def optimize_rules_iterative(
         
         # 初始化 LLM 客户端
         try:
-            from .training import _get_llm_client
+            from .evaluation import _get_llm_client
             client, model_name = _get_llm_client()
         except Exception as e:
             yield json.dumps({"type": "error", "error": f"LLM客户端初始化失败: {e}"}, ensure_ascii=False) + "\n"

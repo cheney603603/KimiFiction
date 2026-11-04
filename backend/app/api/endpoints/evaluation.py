@@ -19,6 +19,18 @@ from app.core.auth import get_current_user
 router = APIRouter(prefix="/training", tags=["training"])
 
 
+def _find_rules_file(project_dir: Path) -> Path:
+    """定位评测规则 CSV（项目根目录或 scripts/evaluation/ 下）。"""
+    candidates = [
+        project_dir / "evaluate_rules_llm.csv",
+        project_dir / "scripts" / "evaluation" / "evaluate_rules_llm.csv",
+    ]
+    for c in candidates:
+        if c.exists():
+            return c
+    return candidates[0]
+
+
 class EvaluationRequest(BaseModel):
     novel_id: Optional[int] = None
     text: Optional[str] = None
@@ -124,7 +136,7 @@ async def run_evaluation(
     # 1. 加载规则
     backend_dir = Path(__file__).resolve().parent.parent.parent
     project_dir = backend_dir.parent
-    rules_file = project_dir / "evaluate_rules_llm.csv"
+    rules_file = _find_rules_file(project_dir)
     if not rules_file.exists():
         return {"success": False, "error": f"规则文件不存在: {rules_file}"}
 
@@ -380,7 +392,7 @@ def _load_rules_and_dims(project_dir: Path):
     from io import StringIO
     from collections import defaultdict
 
-    rules_file = project_dir / "evaluate_rules_llm.csv"
+    rules_file = _find_rules_file(project_dir)
     if not rules_file.exists():
         return None, None, f"规则文件不存在: {rules_file}"
 
