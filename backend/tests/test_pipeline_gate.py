@@ -26,8 +26,14 @@ class TestPipelineProGate:
 
     def test_pro_user_allowed(self, monkeypatch):
         mod = _load_pipeline()
-        monkeypatch.setattr(mod, "api", lambda method, path, **kw: {"tier": "pro"})
+        monkeypatch.setattr(mod, "api", lambda method, path, **kw: {"tier": "pro", "batch_enabled": True})
         mod.require_pro("fake-token")  # 不抛
+
+    def test_batch_switch_off_blocks(self, monkeypatch):
+        mod = _load_pipeline()
+        monkeypatch.setattr(mod, "api", lambda method, path, **kw: {"tier": "pro", "batch_enabled": False})
+        with pytest.raises(SystemExit):
+            mod.require_pro("fake-token")
 
     def test_backend_unreachable_allows(self, monkeypatch):
         """后端不可达时默认放行，避免把网络问题误判为权限问题。"""

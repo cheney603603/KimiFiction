@@ -52,13 +52,17 @@ def parse_user_override():
 
 
 def require_pro(token):
-    """批量管线是 Pro 功能：free 用户拒绝运行。"""
+    """批量管线是 Pro 功能：free 用户或批量总开关关闭时拒绝运行。"""
     try:
         st = api("GET", "/quota/status", token=token)
     except Exception as e:
         print(f"[gate] 查询额度失败，默认放行（后端不可达? {e}）")
         return
     tier = (st or {}).get("tier", "free")
+    batch_enabled = (st or {}).get("batch_enabled", True)
+    if not batch_enabled:
+        print("\n[gate] 批量管线总开关已关闭（PRO_BATCH_ENABLED=false），拒绝运行。")
+        sys.exit(1)
     if tier != "pro":
         print(
             f"\n[gate] 批量管线是 Pro 功能，当前用户为 {tier} 层。\n"

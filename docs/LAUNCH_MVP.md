@@ -16,7 +16,7 @@
 |---|---|---|
 | M1 BYOK | 用户级 LLM 配置表（Fernet 加密）、中间件/任务队列/后台任务注入上下文、LLM 解析优先级=用户→全局→环境变量；设置页改"我的 Key"表单 | 14 单测 + 113 全量 |
 | M1 额度墙 | users tier/quota 字段、novels user_id（存量回填）、quota_service、建书/生成 402 前置检查、`GET /quota/status`、`POST /quota/tier`（管理员） | 同上 |
-| M2 Pro 解锁 | 批量管线 `run_novel_pipeline.py` 增加 `--user` 归属 + Pro tier 门槛；`WORKER_CONCURRENCY`/`PRO_BATCH_ENABLED` 配置；隐藏非 MVP 导航（规则优化/Agent协作/图谱入口） | 4 单测 + tsc |
+| M2 Pro 解锁 | 批量管线 `run_novel_pipeline.py` 增加 `--user` 归属 + Pro tier 门槛；`WORKER_CONCURRENCY`/`PRO_BATCH_ENABLED` 配置（批量开关接入 `/quota/status` 供管线读取）；revise 计入每月章节额度；隐藏非 MVP 导航（规则优化/Agent协作/图谱入口） | 5 单测 + tsc |
 
 **部署前提**：`backend/.env` 必须设置 `APP_KEY_ENCRYPT_SECRET`（未设置时用户无法保存 Key）。
 **遗留**：M3 真支付接入、按用户并发调度/优先队列、盲读 A/B 验收（关联质量升级方案 §8）。

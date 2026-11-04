@@ -876,9 +876,19 @@ async def get_chapter_feedback(novel_id: int, chapter_number: int):
 @router.post("/revise/{novel_id}", response_model=TaskResultResponse)
 async def revise_chapter(
     novel_id: int,
-    request: ChapterRevisionRequest
+    request: ChapterRevisionRequest,
+    db: AsyncSession = Depends(get_db),
 ):
-    """修订章节"""
+    """修订章节（额度墙：按意见改写同样计入每月章节额度）"""
+    from app.core.user_context import get_current_user_id
+    from app.services.quota_service import QuotaService, QuotaExceeded
+
+    user_id = get_current_user_id()
+    try:
+        await QuotaService(db).assert_can_generate_chapter(user_id)
+    except QuotaExceeded as e:
+        raise HTTPException(status_code=402, detail=str(e))
+
     try:
         engine = await get_workflow_engine(novel_id)
         result = await engine.revise_chapter(
@@ -886,6 +896,11 @@ async def revise_chapter(
             feedback=request.feedback,
             scope=request.scope
         )
+        if result and getattr(result, "success", False):
+            try:
+                await QuotaService(db).record_chapter_generated(user_id)
+            except Exception as count_err:
+                logger.warning(f"[revise] 额度计数失败（不阻塞）: {count_err}")
         return result
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))

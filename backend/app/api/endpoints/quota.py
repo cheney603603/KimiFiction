@@ -18,8 +18,11 @@ async def get_quota_status(
     current_user: dict = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
-    """查询当前用户的额度（tier / 上限 / 已用）。"""
-    return await QuotaService(db).get_status(current_user["id"])
+    """查询当前用户的额度（tier / 上限 / 已用 / 批量管线开关）。"""
+    from app.core.config import settings
+    status = await QuotaService(db).get_status(current_user["id"])
+    status["batch_enabled"] = bool(settings.PRO_BATCH_ENABLED)
+    return status
 
 
 class TierUpdateRequest(BaseModel):
