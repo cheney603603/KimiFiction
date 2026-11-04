@@ -4,7 +4,7 @@
 import sys
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from loguru import logger
 
@@ -12,6 +12,8 @@ from app.core.config import settings
 from app.core.database import init_db, close_db
 from app.core.redis_client import close_redis
 from app.core.task_queue import task_queue
+from app.core.user_context import UserContext
+from app.core.security import decode_access_token
 from app.api.routes import api_router
 
 # 导入任务处理器（确保它们被注册）
@@ -87,6 +89,34 @@ app.add_middleware(
 
 # 注册路由
 app.include_router(api_router)
+
+
+@app.middleware("http")
+async def resolve_user_context(request: Request, call_next):
+    """BYOK：从 JWT 解析当前用户并加载其 LLM 配置快照，注入上下文。
+
+    全链路（含内联生成与后台任务）都通过 user_context 读取用户自己的 API Key。
+    未登录/令牌无效时上下文保持为空，LLM 解析回落全局配置与环境变量。
+    """
+    user_id = None
+    snapshot = None
+    auth_header = request.headers.get("Authorization", "")
+    if auth_header.lower().startswith("bearer "):
+        try:
+            payload = decode_access_token(auth_header[7:])
+            if payload and payload.get("sub"):
+                user_id = int(payload["sub"])
+                from app.core.database import get_session
+                from app.services.llm_user_service import LLMUserConfigService
+                async with get_session() as db:
+                    snapshot = await LLMUserConfigService(db).get_snapshot(user_id)
+        except Exception:
+            logger.warning("解析用户 LLM 配置失败，回落全局配置", exc_info=True)
+            user_id = None
+            snapshot = None
+
+    with UserContext(user_id, snapshot):
+        return await call_next(request)
 
 
 @app.get("/")

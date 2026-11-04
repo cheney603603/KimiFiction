@@ -17,7 +17,7 @@ class NovelService:
     def __init__(self, db: AsyncSession):
         self.db = db
 
-    async def create_novel(self, novel_data: NovelCreate) -> Novel:
+    async def create_novel(self, novel_data: NovelCreate, user_id: Optional[int] = None) -> Novel:
         """创建新小说"""
         novel = Novel(
             title=novel_data.title,
@@ -26,6 +26,7 @@ class NovelService:
             target_chapters=novel_data.target_chapters,
             words_per_chapter=novel_data.words_per_chapter,
             status=NovelStatus.planning,
+            user_id=user_id,
         )
         self.db.add(novel)
         await self.db.commit()

@@ -82,6 +82,25 @@ def _ensure_mysql_schema(sync_conn) -> None:
                 "ADD COLUMN world_setting TEXT NULL COMMENT '世界观设定JSON' "
                 "AFTER genre_analysis"
             )
+        # 2026-11-04: 额度墙归属用户
+        if "user_id" not in novel_columns:
+            alter_statements.append(
+                "ALTER TABLE novels "
+                "ADD COLUMN user_id INT NULL COMMENT '创建者用户ID' AFTER id"
+            )
+
+    if "users" in table_names:
+        user_columns = {column["name"] for column in inspector.get_columns("users")}
+        # 2026-11-04: 额度墙（BYOK 产能订阅）
+        for col, ddl in (
+            ("tier", "ALTER TABLE users ADD COLUMN tier VARCHAR(20) NOT NULL DEFAULT 'free' COMMENT '免费层 free / Pro pro'"),
+            ("novel_quota", "ALTER TABLE users ADD COLUMN novel_quota INT NOT NULL DEFAULT 1 COMMENT '免费层小说数上限, -1 不限'"),
+            ("monthly_chapter_quota", "ALTER TABLE users ADD COLUMN monthly_chapter_quota INT NOT NULL DEFAULT 20 COMMENT '免费层每月章节数上限, -1 不限'"),
+            ("quota_month", "ALTER TABLE users ADD COLUMN quota_month VARCHAR(7) NULL COMMENT '当前额度周期 YYYY-MM'"),
+            ("monthly_chapters_used", "ALTER TABLE users ADD COLUMN monthly_chapters_used INT NOT NULL DEFAULT 0 COMMENT '当前周期已用章节数'"),
+        ):
+            if col not in user_columns:
+                alter_statements.append(ddl)
 
     if "outlines" in table_names:
         outline_columns = {column["name"] for column in inspector.get_columns("outlines")}
@@ -118,6 +137,14 @@ def _ensure_mysql_schema(sync_conn) -> None:
                 "ALTER TABLE chapters "
                 "MODIFY COLUMN status ENUM('draft','review','published','flagged') "
                 "NOT NULL DEFAULT 'draft' COMMENT '状态'"
+            )
+
+    # 2026-11-04: 存量小说归属回填（无主则归给首个用户）
+    if "novels" in table_names and "users" in table_names:
+        novels_cols = {column["name"] for column in inspector.get_columns("novels")}
+        if "user_id" in novels_cols:
+            alter_statements.append(
+                "UPDATE novels SET user_id = (SELECT MIN(id) FROM users) WHERE user_id IS NULL"
             )
 
     for statement in alter_statements:

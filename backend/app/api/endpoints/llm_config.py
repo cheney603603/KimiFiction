@@ -8,7 +8,7 @@ LLM 配置 API
 - 本地模型 (Qwen3.5-2B, Qwen3.5-35B)
 """
 from typing import Optional, List
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 from loguru import logger
 import httpx
@@ -16,6 +16,8 @@ import time
 
 from app.core.llm_config_manager import LLMConfigManager
 from app.core.config import settings
+from app.core.auth import require_auth
+from app.services.llm_user_service import LLMUserConfigService
 
 router = APIRouter()
 
@@ -54,59 +56,62 @@ class LocalModelInfo(BaseModel):
 
 
 @router.post("/config", response_model=LLMConfigResponse)
-async def set_llm_config(config: LLMConfigRequest):
+async def set_llm_config(
+    config: LLMConfigRequest,
+    current_user: dict = Depends(require_auth),
+):
     """
-    设置 LLM 配置
-    
-    前端调用此 API 将用户配置的 LLM 设置传递给后端
+    保存当前用户的 BYOK LLM 配置（仅自己可见，api_key 加密落库）。
+
+    apiKey 为空/未填时表示不修改已有 Key；不写入全局环境变量，避免跨用户串 Key。
     """
+    user_id = current_user["id"]
     try:
-        # 将配置保存到全局配置
+        from app.core.database import get_session
+
         config_dict = {
             "provider": config.provider,
-            "api_key": config.apiKey,
             "base_url": config.baseUrl,
             "model": config.model,
-            "response_time": config.responseTime,
-            "timeout": config.timeout,
         }
-        
-        # 本地模型配置
-        if config.localModelId:
-            config_dict["local_model_id"] = config.localModelId
-        if config.localNCtx:
-            config_dict["local_n_ctx"] = config.localNCtx
-        if config.localNGpuLayers is not None:
-            config_dict["local_n_gpu_layers"] = config.localNGpuLayers
-        
-        # 使用配置管理器设置全局配置
-        LLMConfigManager.set_config(config_dict)
-        
-        # 同时设置环境变量（用于兼容）
-        import os
-        os.environ["LLM_PROVIDER"] = config.provider
         if config.apiKey:
-            os.environ["LLM_API_KEY"] = config.apiKey
-        if config.baseUrl:
-            os.environ["LLM_BASE_URL"] = config.baseUrl
-        if config.model:
-            os.environ["LLM_MODEL"] = config.model
-        if config.responseTime:
-            os.environ["LLM_RESPONSE_TIME"] = str(config.responseTime)
-        
+            config_dict["api_key"] = config.apiKey
+
+        async with get_session() as db:
+            service = LLMUserConfigService(db)
+            await service.upsert(user_id, config_dict)
+
         # 计算超时时间
         timeout = LLMConfigManager.get_timeout()
-        
-        logger.info(f"LLM 配置已更新: provider={config.provider}, base_url={config.baseUrl}, timeout={timeout}s")
-        
+
+        logger.info(f"用户 {user_id} 的 LLM 配置已更新: provider={config.provider}, base_url={config.baseUrl}")
         return LLMConfigResponse(
             success=True,
-            message="配置已保存",
+            message="已保存到「我的 Key」",
             timeout=timeout
         )
-        
+    except RuntimeError as e:
+        logger.error(f"保存用户 LLM 配置失败: {e}")
+        raise HTTPException(status_code=400, detail=str(e))
     except Exception as e:
-        logger.error(f"保存 LLM 配置失败: {e}")
+        logger.error(f"保存用户 LLM 配置失败: {e}")
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@router.delete("/config")
+async def clear_llm_config(
+    current_user: dict = Depends(require_auth),
+):
+    """清除当前用户的 BYOK LLM 配置（移除其 Key）。"""
+    user_id = current_user["id"]
+    try:
+        from app.core.database import get_session
+
+        async with get_session() as db:
+            removed = await LLMUserConfigService(db).delete(user_id)
+        return {"success": True, "removed": removed, "message": "已清除我的配置"}
+    except Exception as e:
+        logger.error(f"清除用户 LLM 配置失败: {e}")
         raise HTTPException(status_code=500, detail=str(e))
 
 
@@ -121,16 +126,28 @@ async def get_timeout():
 
 
 @router.get("/config/current")
-async def get_current_config():
-    """获取当前 LLM 配置（隐藏敏感信息）"""
-    config = LLMConfigManager.get_config()
+async def get_current_config(
+    current_user: dict = Depends(require_auth),
+):
+    """获取当前 LLM 配置（BYOK：优先展示用户自己的配置，隐藏敏感信息）"""
+    user_id = current_user["id"]
+    from app.core.database import get_session
+
+    user_config = {}
+    async with get_session() as db:
+        user_config = await LLMUserConfigService(db).get_snapshot(user_id)
+
+    effective = LLMConfigManager.get_config()
+    merged = {**effective, **user_config}
+
     return {
-        "provider": config.get("provider"),
-        "base_url": config.get("base_url"),
-        "model": config.get("model"),
-        "has_api_key": bool(config.get("api_key")),
-        "response_time": config.get("response_time"),
-        "timeout": config.get("timeout"),
+        "provider": merged.get("provider"),
+        "base_url": merged.get("base_url"),
+        "model": merged.get("model"),
+        "has_api_key": bool(merged.get("api_key")),
+        "uses_user_key": bool(user_config.get("api_key")),
+        "response_time": merged.get("response_time"),
+        "timeout": merged.get("timeout"),
     }
 
 
@@ -144,24 +161,33 @@ class TestConnectionResponse(BaseModel):
 
 
 @router.post("/config/test", response_model=TestConnectionResponse)
-async def test_llm_connection(config: LLMConfigRequest):
+async def test_llm_connection(
+    config: LLMConfigRequest,
+    current_user: dict = Depends(require_auth),
+):
     """
     测试 LLM API 连接
-    
+
     通过后端代理测试，优先使用前端传入的配置，
-    如果前端未传入 apiKey 则使用 .env 中的配置
+    未传入 apiKey 时使用当前用户已保存的 Key，再回落 .env 配置。
     """
     start_time = time.time()
-    
+
     try:
         provider = config.provider or "deepseek"
-        
+
+        # 用户已保存的 BYOK 配置兜底
+        from app.core.database import get_session
+        saved = {}
+        async with get_session() as db:
+            saved = await LLMUserConfigService(db).get_snapshot(current_user["id"])
+
         # 优先使用前端传入的配置
-        api_key = config.apiKey
-        base_url = config.baseUrl
-        model = config.model
-        
-        # 如果前端未传入，则使用后端 .env 配置
+        api_key = config.apiKey or saved.get("api_key") or ""
+        base_url = config.baseUrl or saved.get("base_url") or ""
+        model = config.model or saved.get("model") or ""
+
+        # 如果仍未提供，则使用后端 .env 配置
         if not api_key:
             api_key = settings.DEEPSEEK_API_KEY or settings.OPENAI_API_KEY
         if not base_url:

@@ -27,13 +27,22 @@ class WorkflowService:
     async def start_workflow(self, request: WorkflowStartRequest) -> Dict:
         """启动新小说工作流"""
         from app.schemas.novel import NovelCreate
-        
+        from app.core.user_context import get_current_user_id
+        from app.services.quota_service import QuotaService, QuotaExceeded
+
+        # 额度墙：免费层限 1 本
+        user_id = get_current_user_id()
+        try:
+            await QuotaService(self.db).assert_can_create_novel(user_id)
+        except QuotaExceeded as e:
+            raise QuotaExceeded(str(e)) from e
+
         # 1. 创建小说项目
         novel_data = NovelCreate(
             title=request.title,
             genre=request.preferred_genre,
         )
-        novel = await self.novel_service.create_novel(novel_data)
+        novel = await self.novel_service.create_novel(novel_data, user_id=user_id)
         
         # 2. 初始化工作流状态
         state = {

@@ -25,9 +25,18 @@ async def create_novel(
     novel_data: NovelCreate,
     db: AsyncSession = Depends(get_db)
 ):
-    """创建新小说项目"""
+    """创建新小说项目（额度墙：免费层限 1 本）"""
+    from app.core.user_context import get_current_user_id
+    from app.services.quota_service import QuotaService, QuotaExceeded
+
+    user_id = get_current_user_id()
+    try:
+        await QuotaService(db).assert_can_create_novel(user_id)
+    except QuotaExceeded as e:
+        raise HTTPException(status_code=402, detail=str(e))
+
     service = NovelService(db)
-    novel = await service.create_novel(novel_data)
+    novel = await service.create_novel(novel_data, user_id=user_id)
     return novel
 
 

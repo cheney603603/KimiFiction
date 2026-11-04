@@ -98,8 +98,9 @@ class LLMService:
         """初始化OpenAI客户端"""
         try:
             from langchain_openai import ChatOpenAI
-            api_key = os.environ.get("OPENAI_API_KEY") or config.get("api_key") or settings.OPENAI_API_KEY
-            base_url = config.get("base_url") or settings.OPENAI_BASE_URL
+            # 优先使用有效配置（含用户 BYOK），回落环境变量/默认
+            api_key = config.get("api_key") or os.environ.get("OPENAI_API_KEY") or settings.OPENAI_API_KEY
+            base_url = config.get("base_url") or os.environ.get("OPENAI_BASE_URL") or settings.OPENAI_BASE_URL
             
             self.openai_client = ChatOpenAI(
                 model=self.model,
@@ -119,11 +120,20 @@ class LLMService:
         """初始化DeepSeek客户端（直接调用API）"""
         try:
             from langchain_openai import ChatOpenAI
-            
-            # 优先从环境变量获取
-            api_key = os.environ.get("DEEPSEEK_API_KEY") or os.environ.get("LLM_API_KEY") or settings.DEEPSEEK_API_KEY
-            base_url = os.environ.get("DEEPSEEK_BASE_URL") or settings.DEEPSEEK_BASE_URL
-            
+
+            # 优先使用有效配置（含用户 BYOK 的 key/base_url），回落环境变量/默认
+            api_key = (
+                config.get("api_key")
+                or os.environ.get("DEEPSEEK_API_KEY")
+                or os.environ.get("LLM_API_KEY")
+                or settings.DEEPSEEK_API_KEY
+            )
+            base_url = (
+                config.get("base_url")
+                or os.environ.get("DEEPSEEK_BASE_URL")
+                or settings.DEEPSEEK_BASE_URL
+            )
+
             if not api_key:
                 logger.warning("DeepSeek API Key未配置!")
             

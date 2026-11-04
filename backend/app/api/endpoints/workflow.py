@@ -623,9 +623,22 @@ async def execute_workflow_phase(
 async def write_chapter(
     novel_id: int,
     request: ChapterWriteRequest,
-    background_tasks: BackgroundTasks
+    background_tasks: BackgroundTasks,
+    db: AsyncSession = Depends(get_db),
 ):
     """撰写指定章节（异步）"""
+    from app.core.user_context import get_current_user_id, capture, apply
+    from app.services.quota_service import QuotaService, QuotaExceeded
+
+    # 额度墙：免费层每月章节数上限（Pro 不限）
+    try:
+        await QuotaService(db).assert_can_generate_chapter(get_current_user_id())
+    except QuotaExceeded as e:
+        raise HTTPException(status_code=402, detail=str(e))
+
+    # 捕获用户上下文（后台任务脱离 HTTP 中间件作用域，需手动恢复 BYOK 配置）
+    _user_ctx = capture()
+
     task_id = f"novel_{novel_id}_chapter_{request.chapter_number}_{int(asyncio.get_event_loop().time())}"
     
     try:
@@ -661,6 +674,8 @@ async def write_chapter(
         }
         
         async def _write():
+            # 恢复发起请求用户的 BYOK 上下文（本任务是 BackgroundTask，不在中间件作用域内）
+            apply(_user_ctx)
             try:
                 await tracker.update_substep("write_chapter", 1, "初始化写作引擎...")
                 engine = await get_workflow_engine(novel_id)
@@ -783,6 +798,13 @@ async def write_chapter(
                                     if gen_params:
                                         chapter_row.generation_params = gen_params
                                     await db.commit()
+
+                                    # 额度墙：章节落库成功，记录本月已用（Pro 不计数）
+                                    try:
+                                        from app.services.quota_service import QuotaService
+                                        await QuotaService(db).record_chapter_generated(_user_ctx.get("user_id"))
+                                    except Exception as quota_err:
+                                        logger.warning(f"[write_chapter] 额度计数失败（不阻塞）: {quota_err}")
 
                         await tracker.add_log("write_chapter", "章节已自动保存到数据库", "info")
                     except Exception as save_error:
@@ -951,8 +973,12 @@ async def start_workflow(
     db: AsyncSession = Depends(get_db)
 ):
     """启动新小说工作流（兼容旧版）"""
+    from app.services.quota_service import QuotaExceeded
     service = WorkflowService(db)
-    result = await service.start_workflow(request)
+    try:
+        result = await service.start_workflow(request)
+    except QuotaExceeded as e:
+        raise HTTPException(status_code=402, detail=str(e))
     return result
 
 

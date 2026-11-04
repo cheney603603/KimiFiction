@@ -4,7 +4,7 @@
 """
 from datetime import datetime
 from typing import Optional
-from sqlalchemy import String, Boolean, DateTime, Text, func
+from sqlalchemy import String, Boolean, DateTime, Integer, Text, func
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.database import Base
@@ -73,12 +73,21 @@ class User(Base):
         onupdate=func.now(),
         comment="更新时间"
     )
-    
+
     last_login: Mapped[Optional[datetime]] = mapped_column(
         DateTime(timezone=True),
         nullable=True,
         comment="最后登录时间"
     )
+
+    # ── 额度墙（BYOK 产能订阅，2026-11-04 新增）──
+    tier: Mapped[str] = mapped_column(
+        String(20), default="free", nullable=False, comment="免费层 free / Pro pro"
+    )
+    novel_quota: Mapped[int] = mapped_column(Integer, default=1, comment="免费层小说数上限, -1 不限")
+    monthly_chapter_quota: Mapped[int] = mapped_column(Integer, default=20, comment="免费层每月章节数上限, -1 不限")
+    quota_month: Mapped[Optional[str]] = mapped_column(String(7), nullable=True, comment="当前额度周期 YYYY-MM")
+    monthly_chapters_used: Mapped[int] = mapped_column(Integer, default=0, comment="当前周期已用章节数")
     
     def __repr__(self) -> str:
         return f"<User(id={self.id}, username='{self.username}', email='{self.email}')>"

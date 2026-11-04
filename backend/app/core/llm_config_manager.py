@@ -14,6 +14,8 @@ from typing import Optional, Dict, Any
 from dotenv import load_dotenv
 from loguru import logger
 
+from app.core.user_context import get_user_config_snapshot
+
 # 确保环境变量在模块加载时就读取 .env
 load_dotenv(verbose=True)
 
@@ -85,6 +87,11 @@ class LLMConfigManager:
                 except:
                     pass
 
+        # BYOK: 若当前上下文存在用户级 LLM 配置快照（中间件/任务恢复注入），覆盖以上解析结果
+        user_snapshot = get_user_config_snapshot()
+        if user_snapshot:
+            config.update(user_snapshot)
+
         return config
 
     @staticmethod
@@ -140,7 +147,8 @@ class LLMConfigManager:
         if provider == "openai":
             return config.get("base_url", "https://api.openai.com/v1")
         elif provider == "deepseek":
-            return os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
+            # 优先使用有效配置（含用户 BYOK），回落到环境变量/默认
+            return config.get("base_url") or os.getenv("DEEPSEEK_BASE_URL", "https://api.deepseek.com")
         elif provider == "local_llama":
             return os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
         else:

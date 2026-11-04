@@ -49,26 +49,35 @@ const defaultConfigs: Record<string, LLMConfig> = {
 
 export function LLMSettings() {
   const navigate = useNavigate()
-  const [config, setConfig] = useState<LLMConfig>(defaultConfigs.openai)
+  const [config, setConfig] = useState<LLMConfig>(defaultConfigs.deepseek)
   const [saved, setSaved] = useState(false)
   const [error, setError] = useState('')
   const [isTesting, setIsTesting] = useState(false)
   const [testResult, setTestResult] = useState<TestResult | null>(null)
   const [testLogs, setTestLogs] = useState<string[]>([])
+  const [hasSavedKey, setHasSavedKey] = useState(false)
+  const [clearing, setClearing] = useState(false)
 
   useEffect(() => {
-    // 从 localStorage 加载配置
-    const saved = localStorage.getItem('llm_config')
-    if (saved) {
-      try {
-        setConfig(JSON.parse(saved))
-      } catch {
-        // 解析失败，使用默认
-      }
-    } else {
-      // 首次加载时，自动保存默认配置
-      localStorage.setItem('llm_config', JSON.stringify(defaultConfigs.kimi))
-    }
+    // BYOK：从后端加载当前用户的配置（Key 不回显明文）
+    llmConfigApi.getCurrentConfig()
+      .then((res: any) => {
+        setHasSavedKey(!!res.uses_user_key)
+        if (res.provider) {
+          setConfig(prev => ({
+            ...prev,
+            provider: res.provider as any,
+            baseUrl: res.base_url || prev.baseUrl,
+            model: res.model || prev.model,
+          }))
+        }
+        if (res.timeout) {
+          setConfig(prev => ({ ...prev, timeout: res.timeout }))
+        }
+      })
+      .catch(() => {
+        // 后端不可达时使用默认配置
+      })
   }, [])
 
   const addLog = (message: string) => {
@@ -76,19 +85,12 @@ export function LLMSettings() {
   }
 
   const handleSave = async () => {
-    if (!config.apiKey && config.provider === 'openai') {
-      setError('OpenAI 需要提供 API Key')
-      return
-    }
-
-    // 保存到 localStorage
-    localStorage.setItem('llm_config', JSON.stringify(config))
-
-    // 同步到后端
+    // 保存到后端（BYOK：Key 加密存储，不回显明文）
     try {
       const result = await llmConfigApi.saveConfig({
         provider: config.provider,
-        apiKey: config.apiKey,
+        // 未输入新 Key 时不覆盖已有 Key（后端回落已保存的 Key / 全局配置）
+        apiKey: config.apiKey || undefined,
         baseUrl: config.baseUrl,
         model: config.model,
         responseTime: config.responseTime,
@@ -97,12 +99,33 @@ export function LLMSettings() {
 
       addLog(`✅ 后端配置已同步: ${config.provider} @ ${config.baseUrl}`)
       addLog(`超时时间设置为 ${result.timeout} 秒`)
+      if (config.apiKey) {
+        setHasSavedKey(true)
+        setConfig(prev => ({ ...prev, apiKey: '' }))
+      }
       setSaved(true)
       setError('')
       setTimeout(() => setSaved(false), 2000)
     } catch (err: any) {
-      setError(`保存到后端失败: ${err.message}`)
-      addLog(`❌ 保存失败: ${err.message}`)
+      const detail = err?.response?.data?.detail || err.message
+      setError(`保存到后端失败: ${detail}`)
+      addLog(`❌ 保存失败: ${detail}`)
+    }
+  }
+
+  const handleClearConfig = async () => {
+    if (!window.confirm('清除你的 LLM 配置？之后将回落服务端默认配置。')) return
+    setClearing(true)
+    try {
+      const res = await llmConfigApi.clearConfig()
+      setHasSavedKey(false)
+      setConfig(prev => ({ ...prev, apiKey: '', baseUrl: defaultConfigs[prev.provider]?.baseUrl || '', model: defaultConfigs[prev.provider]?.model || '' }))
+      setError('')
+      addLog(`✅ ${res?.message || '已清除我的配置'}`)
+    } catch (err: any) {
+      setError(`清除失败: ${err?.response?.data?.detail || err.message}`)
+    } finally {
+      setClearing(false)
     }
   }
 
@@ -193,10 +216,10 @@ export function LLMSettings() {
         {/* 左侧：配置表单 */}
         <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700 p-8">
           <h1 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">
-            LLM API 配置
+            我的 LLM 配置（BYOK）
           </h1>
           <p className="text-gray-500 dark:text-gray-400 mb-8">
-            配置大语言模型 API，支持 OpenAI 或本地 Chat2Api 服务
+            配置你自己的 API Key（Bring Your Own Key）：生成/评测的 token 费用由你自己的 Key 承担。
           </p>
 
           {error && (
@@ -246,24 +269,24 @@ export function LLMSettings() {
               </div>
             </div>
 
-            {/* API Key (仅 OpenAI 需要) */}
-            {config.provider === 'openai' && (
-              <div>
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
-                  API Key
-                </label>
-                <input
-                  type="password"
-                  value={config.apiKey}
-                  onChange={(e) => setConfig({ ...config, apiKey: e.target.value })}
-                  placeholder="sk-..."
-                  className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
-                />
-                <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
-                  你的 OpenAI API Key，仅存储在本地浏览器
-                </p>
-              </div>
-            )}
+            {/* API Key（BYOK：加密存服务端，不回显明文） */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                API Key {hasSavedKey && <span className="text-green-600 dark:text-green-400 text-xs">· 已配置</span>}
+              </label>
+              <input
+                type="password"
+                value={config.apiKey}
+                onChange={(e) => setConfig({ ...config, apiKey: e.target.value })}
+                placeholder={hasSavedKey ? '已配置 Key（留空则不修改）' : 'sk-... / 你的 API Key'}
+                className="w-full px-4 py-2 border border-gray-300 dark:border-gray-600 rounded-lg bg-white dark:bg-gray-700 text-gray-900 dark:text-white focus:ring-2 focus:ring-primary-500 focus:border-transparent"
+              />
+              <p className="text-sm text-gray-500 dark:text-gray-400 mt-1">
+                {hasSavedKey
+                  ? '已保存你的 Key（不显示明文）。输入新 Key 可更换；留空保存则保持不变。'
+                  : '你的 API Key，加密存储于服务端，仅你的账号可用（BYOK）。'}
+              </p>
+            </div>
 
             {/* Base URL */}
             <div>
@@ -352,6 +375,17 @@ export function LLMSettings() {
                 保存配置
               </button>
             </div>
+
+            {/* 清除我的配置 */}
+            <div className="pt-2">
+              <button
+                onClick={handleClearConfig}
+                disabled={clearing || !hasSavedKey}
+                className="text-sm text-red-600 dark:text-red-400 hover:text-red-700 dark:hover:text-red-300 disabled:opacity-40 disabled:cursor-not-allowed"
+              >
+                {clearing ? '清除中...' : '清除我的配置（移除我的 Key）'}
+              </button>
+            </div>
           </div>
         </div>
 
@@ -431,10 +465,10 @@ export function LLMSettings() {
           <div className="mt-6 text-sm text-gray-400">
             <h3 className="font-medium text-gray-300 mb-2">使用说明:</h3>
             <ul className="space-y-1 list-disc list-inside">
-              <li>OpenAI: 需要有效的 API Key</li>
-              <li>Chat2Api: 需要先启动 chat2api 服务并登录</li>
+              <li>你的 API Key 加密存储于服务端，仅你的账号使用，其他人不可见</li>
+              <li>生成/评测的 token 费用由你自己的 Key 承担（BYOK）</li>
+              <li>未配置 Key 时回落服务端默认配置（管理员网关）</li>
               <li>测试成功后再保存配置</li>
-              <li>配置保存在浏览器本地存储</li>
             </ul>
           </div>
         </div>

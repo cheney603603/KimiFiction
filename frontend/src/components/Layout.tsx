@@ -1,6 +1,8 @@
 import { Link, useLocation, useNavigate, Outlet } from 'react-router-dom'
-import { BookOpen, Home, Settings, Moon, Sun, User, LogOut, GitBranch, BarChart3, Sparkles } from 'lucide-react'
+import { BookOpen, Home, Settings, Moon, Sun, User, LogOut, GitBranch, BarChart3, Sparkles, Fuel } from 'lucide-react'
 import { useState, useEffect } from 'react'
+import { quotaApi } from '../services/api'
+import { QuotaModal } from './QuotaModal'
 
 interface LayoutProps {
   children: React.ReactNode
@@ -13,12 +15,22 @@ interface UserInfo {
   avatar?: string
 }
 
+interface QuotaStatus {
+  tier: string
+  novel_quota: number
+  novels_used: number
+  monthly_chapter_quota: number
+  chapters_used: number
+  is_unlimited: boolean
+}
+
 export function Layout(_props: LayoutProps) {
   const location = useLocation()
   const navigate = useNavigate()
   const [darkMode, setDarkMode] = useState(false)
   const [user, setUser] = useState<UserInfo | null>(null)
   const [showUserMenu, setShowUserMenu] = useState(false)
+  const [quota, setQuota] = useState<QuotaStatus | null>(null)
 
   useEffect(() => {
     if (darkMode) {
@@ -38,6 +50,13 @@ export function Layout(_props: LayoutProps) {
         // 解析失败，忽略
       }
     }
+  }, [])
+
+  // 加载当前用户额度（BYOK 产能订阅）
+  useEffect(() => {
+    quotaApi.getStatus()
+      .then((res: any) => setQuota(res))
+      .catch(() => {})
   }, [])
 
   const handleLogout = () => {
@@ -111,7 +130,7 @@ export function Layout(_props: LayoutProps) {
                 </button>
 
                 {showUserMenu && (
-                  <div className="absolute right-0 mt-2 w-48 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1 z-50">
+                  <div className="absolute right-0 mt-2 w-60 bg-white dark:bg-gray-800 rounded-lg shadow-lg border border-gray-200 dark:border-gray-700 py-1 z-50">
                     <div className="px-4 py-2 border-b border-gray-200 dark:border-gray-700">
                       <p className="text-sm font-medium text-gray-900 dark:text-white">
                         {user?.nickname || user?.username}
@@ -120,6 +139,36 @@ export function Layout(_props: LayoutProps) {
                         {user?.username}
                       </p>
                     </div>
+
+                    {/* 额度展示（BYOK 产能订阅） */}
+                    {quota && (
+                      <div className="px-4 py-2 border-b border-gray-200 dark:border-gray-700">
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="flex items-center gap-1 text-gray-500 dark:text-gray-400">
+                            <Fuel className="h-3.5 w-3.5" />
+                            额度
+                          </span>
+                          <span className={`px-1.5 py-0.5 rounded text-[10px] font-semibold ${
+                            quota.tier === 'pro'
+                              ? 'bg-indigo-100 text-indigo-700 dark:bg-indigo-900 dark:text-indigo-300'
+                              : 'bg-gray-100 text-gray-600 dark:bg-gray-700 dark:text-gray-300'
+                          }`}>
+                            {quota.tier === 'pro' ? 'PRO' : 'FREE'}
+                          </span>
+                        </div>
+                        {quota.is_unlimited ? (
+                          <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
+                            章节/小说不限（你的 Key 预算内）
+                          </p>
+                        ) : (
+                          <div className="mt-1 space-y-0.5 text-xs text-gray-500 dark:text-gray-400">
+                            <p>小说 {quota.novels_used}/{quota.novel_quota} 本</p>
+                            <p>本月章节 {quota.chapters_used}/{quota.monthly_chapter_quota} 章</p>
+                          </div>
+                        )}
+                      </div>
+                    )}
+
                     <button
                       onClick={handleLogout}
                       className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-600 hover:bg-red-50 dark:hover:bg-red-900/20"
@@ -156,6 +205,9 @@ export function Layout(_props: LayoutProps) {
           onClick={() => setShowUserMenu(false)}
         />
       )}
+
+      {/* 全局额度超限弹层 */}
+      <QuotaModal />
     </div>
   )
 }

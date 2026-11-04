@@ -49,6 +49,10 @@ api.interceptors.response.use(
       localStorage.removeItem('access_token')
       localStorage.removeItem('user')
       window.location.href = '/login'
+    } else if (error.response?.status === 402) {
+      // 额度超限（BYOK 产能订阅）
+      const detail = error.response?.data?.detail || '额度已用完，升级 Pro 可继续创作'
+      window.dispatchEvent(new CustomEvent('quota-exceeded', { detail: String(detail) }))
     }
     return Promise.reject(error)
   }
@@ -365,6 +369,18 @@ export const llmConfigApi = {
     baseUrl?: string
     model?: string
   }) => api.post('/llm/config/test', config),
+
+  // 清除当前用户的 BYOK 配置（移除其 Key）
+  clearConfig: () => api.delete('/llm/config'),
+}
+
+// 额度墙 API（BYOK 产能订阅）
+export const quotaApi = {
+  // 查询当前用户额度
+  getStatus: () => api.get('/quota/status'),
+  // 管理员置位 tier
+  setTier: (data: { username: string; tier: 'pro' | 'free'; novel_quota?: number; monthly_chapter_quota?: number }) =>
+    api.post('/quota/tier', data),
 }
 
 // 记忆相关API

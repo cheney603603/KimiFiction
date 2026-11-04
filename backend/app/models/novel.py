@@ -4,7 +4,7 @@
 """
 from datetime import datetime
 from typing import Optional, List
-from sqlalchemy import String, Text, Integer, Enum, DateTime, func
+from sqlalchemy import String, Text, Integer, Enum, DateTime, ForeignKey, func
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 import enum
 
@@ -26,7 +26,12 @@ class Novel(Base):
     
     # 主键
     id: Mapped[int] = mapped_column(primary_key=True, autoincrement=True)
-    
+
+    # 归属用户（额度墙：免费层 1 本；2026-11-04 新增，旧数据回填为首个用户）
+    user_id: Mapped[Optional[int]] = mapped_column(
+        Integer, ForeignKey("users.id"), nullable=True, index=True, comment="创建者用户ID"
+    )
+
     # 基本信息
     title: Mapped[str] = mapped_column(String(255), nullable=False, comment="小说标题")
     genre: Mapped[str] = mapped_column(String(100), nullable=True, comment="小说类型(玄幻/科幻/都市等)")

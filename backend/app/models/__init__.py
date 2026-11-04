@@ -10,6 +10,7 @@ from app.models.outline import Outline
 from app.models.memory_node import MemoryNode
 from app.models.entity import Entity, EntityRelationship
 from app.models.feedback import ChapterFeedback, FrameworkAdjustment, WritingSession
+from app.models.user_llm_config import UserLLMConfig
 from app.models.rubric import (
     RubricTemplate,
     RubricDimension,
@@ -40,4 +41,5 @@ __all__ = [
     "TrainingBatch",
     "ComparisonReport",
     "SampledEvaluationHistory",
+    "UserLLMConfig",
 ]

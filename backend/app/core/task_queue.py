@@ -60,12 +60,15 @@ class TaskQueue:
             任务ID
         """
         import uuid
-        
+
+        from app.core.user_context import capture
+
         task_id = str(uuid.uuid4())
         task_data = {
             "id": task_id,
             "type": task_type,
             "payload": payload,
+            "user_ctx": capture(),  # BYOK: 记录发起任务的用户与 LLM 配置快照
             "priority": priority.value,
             "status": TaskStatus.PENDING.value,
             "created_at": datetime.now().isoformat(),
@@ -207,9 +210,12 @@ class TaskQueue:
         })
         
         try:
-            # 执行处理器
-            result = await handler(task["payload"])
-            
+            # 恢复发起任务的用户上下文（BYOK：worker 内可解析该用户的 Key）
+            from app.core.user_context import restore
+            with restore(task.get("user_ctx") or {}):
+                # 执行处理器
+                result = await handler(task["payload"])
+
             # 更新为完成状态
             await self.update_task(task_id, {
                 "status": TaskStatus.COMPLETED.value,
