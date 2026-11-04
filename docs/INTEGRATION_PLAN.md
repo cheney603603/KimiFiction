@@ -1,5 +1,11 @@
 # KimiFiction 评测系统集成计划
 
+> **状态：已执行（过时存档）**。本文档为早期集成计划，所列"新建/缺失"均已落地：
+> 评测 API 位于 `app/api/endpoints/evaluation.py`（含采样评测/章节评测/历史），
+> 前端 `frontend/src/pages/Evaluation.tsx`、`EvaluationOptimizer.tsx` 已上线，
+> 规则文件为 `scripts/evaluation/evaluate_rules_llm.csv`（88 条规则，8 维度）。
+> 后续新增能力见 `docs/LLM_CALL_CHAIN.md` §6（个人上传/我的小说评测/规则回滚）。
+
 ## 当前状态
 
 ### Backend
