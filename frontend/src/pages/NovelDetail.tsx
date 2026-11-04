@@ -3,7 +3,7 @@ import { useParams, Link } from 'react-router-dom'
 import { useQuery } from '@tanstack/react-query'
 import {
   BookOpen, Users, FileText, MessageSquare, ChevronRight, Download, X, FileDown,
-  ArrowLeft, Sparkles, Network, History, Shield, MapPin, Package, Zap, Share2, BookMarked,
+  ArrowLeft, Sparkles, History, Shield, MapPin, Package, Zap, Share2, BookMarked,
 } from 'lucide-react'
 import { novelApi, chapterApi, exportApi, worldApi } from '../services/api'
 import { NovelNav } from '../components/NovelNav'
@@ -188,7 +188,6 @@ export function NovelDetail() {
         {[
           { title: '继续创作', description: '单一章节撰写，快速生成内容', icon: MessageSquare, href: `/novel/${id}/write`, color: 'bg-blue-500' },
           { title: '阅读小说', description: `已生成 ${novel.total_chapters} 章`, icon: BookOpen, href: `/novel/${id}/read`, color: 'bg-green-500' },
-          { title: '实体图谱', description: '角色与势力的关系网', icon: Network, href: `/novel/${id}/graph`, color: 'bg-indigo-500', badge: '新' },
           { title: '快照管理', description: '查看历史状态，可回滚', icon: History, href: `/novel/${id}/snapshots`, color: 'bg-red-500' },
         ].map(item => (
           <Link
@@ -204,11 +203,6 @@ export function NovelDetail() {
                 <h3 className="font-semibold text-gray-900 dark:text-white">
                   {item.title}
                 </h3>
-                {item.badge && (
-                  <span className="px-2 py-0.5 text-xs font-medium rounded-full bg-indigo-100 text-indigo-700 dark:bg-indigo-900/30 dark:text-indigo-400">
-                    {item.badge}
-                  </span>
-                )}
               </div>
               <p className="text-sm text-gray-500 dark:text-gray-400">
                 {item.description}

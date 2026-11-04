@@ -53,8 +53,8 @@ async def lifespan(app: FastAPI):
     
     # 启动任务队列工作进程
     try:
-        await task_queue.start_worker(concurrency=2)
-        logger.info("任务队列工作进程已启动")
+        await task_queue.start_worker(concurrency=settings.WORKER_CONCURRENCY)
+        logger.info(f"任务队列工作进程已启动（并发 {settings.WORKER_CONCURRENCY}）")
     except Exception as e:
         logger.error(f"任务队列启动失败: {e}")
     

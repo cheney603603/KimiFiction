@@ -8,6 +8,9 @@
 
 full: 设计阶段 → 批量写章节 一键贯通；已存在小说时自动续写未写章节。
       --watch 失败自动重试直到写满；--webhook URL 完成后 POST 通知。
+
+批量管线（full / chapters）为 Pro 功能（M2 额度墙）：默认账号 e2e_test_user 需为 pro；
+--user <username> [--password <pw>] 指定其他用户（BYOK：后端按该用户的 Key 计费）。
 """
 import sys
 import os
@@ -36,6 +39,33 @@ def api(method, path, payload=None, token=None, timeout=3700):
 
 def login():
     return api("POST", "/auth/login", {"username": USER, "password": PASSWORD})["access_token"]
+
+
+def parse_user_override():
+    """解析 --user [--password] 参数覆盖默认账号（批量管线 Pro 门槛依赖账号 tier）。"""
+    global USER, PASSWORD
+    sargs = sys.argv
+    if "--user" in sargs:
+        USER = sargs[sargs.index("--user") + 1]
+    if "--password" in sargs:
+        PASSWORD = sargs[sargs.index("--password") + 1]
+
+
+def require_pro(token):
+    """批量管线是 Pro 功能：free 用户拒绝运行。"""
+    try:
+        st = api("GET", "/quota/status", token=token)
+    except Exception as e:
+        print(f"[gate] 查询额度失败，默认放行（后端不可达? {e}）")
+        return
+    tier = (st or {}).get("tier", "free")
+    if tier != "pro":
+        print(
+            f"\n[gate] 批量管线是 Pro 功能，当前用户为 {tier} 层。\n"
+            f"       请用 --user <pro用户> 运行，或联系管理员开通 Pro（POST /api/v1/quota/tier）。"
+        )
+        sys.exit(1)
+    print(f"[gate] 用户 tier={tier}，批量管线放行。")
 
 
 def _extract_status(prog):
@@ -250,6 +280,7 @@ def cmd_design(argv):
 
 def cmd_chapters(argv):
     token = login()
+    require_pro(token)  # 批量管线为 Pro 功能
     meta = json.load(open("logs/novel_meta.json", encoding="utf-8")) if __import__("os").path.exists("logs/novel_meta.json") else {}
     novel_id = meta.get("novel_id")
     # parse
@@ -331,6 +362,7 @@ def cmd_full(argv):
         count = int(sargs[sargs.index("--count") + 1])
 
     token = login()
+    require_pro(token)  # 批量管线为 Pro 功能
 
     # 1. 确定 novel_id（已有小说则续跑，否则先跑设计阶段）
     if novel_id is None and os.path.exists("logs/novel_meta.json"):
@@ -396,6 +428,7 @@ def cmd_full(argv):
 
 
 if __name__ == "__main__":
+    parse_user_override()
     cmd = sys.argv[1] if len(sys.argv) > 1 else "design"
     if cmd == "design":
         cmd_design(sys.argv)

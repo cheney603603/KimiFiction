@@ -2,13 +2,25 @@
 
 | 项 | 内容 |
 |---|---|
-| 文档版本 | v0.1（方案稿，未开工） |
+| 文档版本 | v0.2（M1/M2 已落地） |
 | 日期 | 2026-11-04 |
 | 产品形态 | **作者工具**（用户用 AI 生成并管理自己的小说），非阅读平台 |
 | 计费模型 | **Bring Your Own Key（BYOK）**：两种 tier 的 token 成本都由用户自己的 API Key 承担；平台只卖"编排产能" |
 | 决策记录 | 关联 `docs/NOVEL_QUALITY_UPGRADE_PLAN.md` §0 D1–D5 |
 
 ---
+
+## 执行记录
+
+| 阶段 | 落地情况 | 验证 |
+|---|---|---|
+| M1 BYOK | 用户级 LLM 配置表（Fernet 加密）、中间件/任务队列/后台任务注入上下文、LLM 解析优先级=用户→全局→环境变量；设置页改"我的 Key"表单 | 14 单测 + 113 全量 |
+| M1 额度墙 | users tier/quota 字段、novels user_id（存量回填）、quota_service、建书/生成 402 前置检查、`GET /quota/status`、`POST /quota/tier`（管理员） | 同上 |
+| M2 Pro 解锁 | 批量管线 `run_novel_pipeline.py` 增加 `--user` 归属 + Pro tier 门槛；`WORKER_CONCURRENCY`/`PRO_BATCH_ENABLED` 配置；隐藏非 MVP 导航（规则优化/Agent协作/图谱入口） | 4 单测 + tsc |
+
+**部署前提**：`backend/.env` 必须设置 `APP_KEY_ENCRYPT_SECRET`（未设置时用户无法保存 Key）。
+**遗留**：M3 真支付接入、按用户并发调度/优先队列、盲读 A/B 验收（关联质量升级方案 §8）。
+
 
 ## 1. 商业模型一句话
 

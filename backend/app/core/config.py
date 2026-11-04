@@ -94,6 +94,12 @@ class Settings(BaseSettings):
 
     # 写作管线 V2（P1：分场景生成 + 硬门禁 + 盲评 + 诊断，§9 回滚策略：默认关闭）
     WRITING_PIPELINE_V2: bool = Field(default=False, description="启用分场景写作管线 V2")
+
+    # ── 产能订阅（BYOK 额度墙，M2，2026-11-04）──
+    # 全局任务队列并发（部署侧可按负载调高；Pro 用户建议 4+）
+    WORKER_CONCURRENCY: int = Field(default=2, description="任务队列工作进程并发数")
+    # 批量管线总开关（false 时即使 Pro 也禁用 run_novel_pipeline 批量写）
+    PRO_BATCH_ENABLED: bool = Field(default=True, description="批量管线(Pro)总开关")
     
     # 记忆管理配置
     WORKING_MEMORY_CHAPTERS: int = Field(default=3, description="工作记忆章节数")
