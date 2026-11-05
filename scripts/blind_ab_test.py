@@ -223,6 +223,13 @@ def main(args):
     # 3. 逐章生成（--parallel N 并行多个章节；受后端全局 RPM 限速保护，不会打爆网关）
     from concurrent.futures import ThreadPoolExecutor
 
+    def _skip_done(out_path, n):
+        """断点续跑：输出文件已存在且非空 → 跳过该章（不重复生成，不重复消耗 token）。"""
+        if out_path.exists() and out_path.stat().st_size > 0:
+            print(f"=== [ch{n}] {FIXED_OUTLINES[n-1]['title']} 已存在({out_path.stat().st_size} bytes)，跳过")
+            return True
+        return False
+
     results = []
     if args.parallel > 1:
         print(f">>> 并行生成 {args.parallel} 章并发（全局 RPM 限速保护）")
@@ -231,6 +238,9 @@ def main(args):
             for outline in FIXED_OUTLINES:
                 n = outline["chapter_number"]
                 out_path = out_dir / f"{args.variant}_ch{n}.md"
+                if _skip_done(out_path, n):
+                    results.append((n, True))
+                    continue
                 f = pool.submit(generate_one, base, token, novel_id, outline, args.style, out_path)
                 futures[f] = n
             for f in futures:
@@ -239,6 +249,9 @@ def main(args):
         for outline in FIXED_OUTLINES:
             n = outline["chapter_number"]
             out_path = out_dir / f"{args.variant}_ch{n}.md"
+            if _skip_done(out_path, n):
+                results.append((n, True))
+                continue
             ok = generate_one(base, token, novel_id, outline, args.style, out_path)
             results.append((n, ok))
 

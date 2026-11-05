@@ -65,8 +65,8 @@ async def _record_llm_usage(
                 retry_count=retry_count,
                 error=error[:500],
             )
-    except Exception:
-        pass
+    except Exception as e:  # noqa: BLE001
+        logger.warning(f"[LLM usage] 记录用量失败(静默): {type(e).__name__}: {e}")
 
 
 class LLMProvider(str, Enum):

@@ -38,6 +38,10 @@ def set_agent_context(agent: Optional[str]):
     current_agent_name.set(agent)
 
 
+def get_current_agent_name() -> Optional[str]:
+    return current_agent_name.get()
+
+
 @dataclass
 class LLMCallContext:
     """LLM调用上下文"""
