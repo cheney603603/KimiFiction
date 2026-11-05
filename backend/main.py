@@ -22,6 +22,12 @@ import app.workflow_handlers  # noqa
 
 # 配置日志
 logger.remove()
+# Windows 控制台默认 GBK，先切到 UTF-8，避免日志里的 emoji/中文触发 loguru 编码崩溃
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except Exception:
+    pass
 logger.add(
     sys.stdout,
     colorize=True,

@@ -178,7 +178,13 @@ def generate_one(base, token, novel_id, outline, style, out_path):
             )
             print(f"    => 完成 字数≈{len(content)} -> {out_path}")
             return True
-        print(f"    => 第{attempt}次未入库，重试...")
+        # 未入库：拉取任务进度诊断失败原因
+        try:
+            prog = api(base, "GET", f"/workflow/task-progress/{task_id}", token=token)
+            diag = json.dumps(prog, ensure_ascii=False)[:400]
+        except Exception:
+            diag = "(task-progress 不可读)"
+        print(f"    => 第{attempt}次未入库。任务诊断: {diag}")
         time.sleep(30)
     return False
 

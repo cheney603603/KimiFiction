@@ -465,7 +465,7 @@ class WriterReaderLoop:
         if not self.loop_history:
             return {"status": "no_history"}
 
-        rewards = [h["reward"] for h in self.loop_history]
+        rewards = [h.get("reward", 0.0) for h in self.loop_history]
         reader_scores = [h.get("reader_score", 0) for h in self.loop_history]
 
         report = {
