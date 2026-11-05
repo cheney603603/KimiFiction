@@ -259,6 +259,10 @@ class WriterReaderLoop:
             else:
                 action = WritingAction.REVISE
 
+            # 用量归属：writer/reader 子阶段细分
+            from app.core.llm_call_tracker import set_phase_context, set_agent_context
+            set_phase_context("writer")
+            set_agent_context("writer")
             writer_result = await self._writer_act(
                 action=action,
                 outline=outline,
@@ -280,7 +284,10 @@ class WriterReaderLoop:
             self.current_state.draft = new_draft
             self.current_state.draft_version = round_num
 
-            # Reader Agent 评估（带前文/角色/世界观上下文）
+            # 用量归属：reader 子阶段
+            from app.core.llm_call_tracker import set_phase_context, set_agent_context
+            set_phase_context("reader")
+            set_agent_context("reader")
             reader_result = await self._reader_evaluate(
                 draft=new_draft,
                 outline=outline,

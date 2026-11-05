@@ -1335,6 +1335,11 @@ class WorkflowEngine:
 
         self.state.current_chapter = chapter_number
 
+        # 用量归属：本章所有 LLM 调用记为 chapter_writing 阶段（循环内再细分 writer/reader）
+        from app.core.llm_call_tracker import set_phase_context, set_novel_context, set_agent_context
+        set_phase_context(WorkflowPhase.CHAPTER_WRITING.value)
+        set_novel_context(self.novel_id, chapter_number)
+
         # 辅助函数：从细纲数组中查找指定章节
         def _find_chapter_outline(chapter_outlines: list, ch_num: int) -> dict:
             for co in chapter_outlines:
@@ -1548,6 +1553,8 @@ class WorkflowEngine:
     
         if result and result.success:
             if reviewer_agent and chapter_content:
+                set_phase_context(WorkflowPhase.CHAPTER_REVIEW.value)
+                set_agent_context("reviewer")
                 review_result = await reviewer_agent.process({
                     "workflow_id": self.state.workflow_id,
                     "novel_id": self.novel_id,
