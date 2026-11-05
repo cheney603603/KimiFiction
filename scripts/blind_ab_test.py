@@ -8,8 +8,13 @@
   python scripts/blind_ab_test.py --variant B --backend http://127.0.0.1:8081 --user <你的账号> --out blind_ab
 
 产出 blind_ab/ ：
-  A_ch1.md~A_ch5.md / B_ch1.md~B_ch5.md   生成正文（同一组 5 个固定细纲）
-  protocol.md                              盲读协议 + 随机编号打分表
+  A_ch1.md~A_ch5.md / B_ch1.md~B_ch5.md   生成正文（同一组 5 个固定细纲，带变体标签）
+
+盲读评审（不可见 A/B 标签）：
+  python scripts/blind_ab_test.py --finalize --out blind_ab
+  生成 blind_ab/评审包/（01.md~10.md，随机编号，无变体标签）
+  + blind_ab/答案对照.txt（A/B 映射，仅组织者查看）
+  + blind_ab/评分表.md（评审人填写）
 
 固定 5 个细纲覆盖：冲突 / 过渡 / 情绪 / 信息 / 群像 各一（§8.1）。
 可用 --novel <id> 复用已存在小说（续跑指定细纲）。
@@ -178,17 +183,7 @@ def generate_one(base, token, novel_id, outline, style, out_path):
     return False
 
 
-def main():
-    parser = argparse.ArgumentParser(description="盲读 A/B 验收生成")
-    parser.add_argument("--variant", required=True, choices=["A", "B"])
-    parser.add_argument("--backend", default="http://127.0.0.1:8080")
-    parser.add_argument("--user", required=True)
-    parser.add_argument("--password", default="Test123")
-    parser.add_argument("--out", default="blind_ab")
-    parser.add_argument("--novel", type=int, default=None)
-    parser.add_argument("--style", default=DEFAULT_STYLE)
-    args = parser.parse_args()
-
+def main(args):
     base = args.backend.rstrip("/") + "/api/v1"
     out_dir = Path(args.out)
     out_dir.mkdir(parents=True, exist_ok=True)
@@ -220,46 +215,69 @@ def main():
         ok = generate_one(base, token, novel_id, outline, args.style, out_path)
         results.append((n, ok))
 
-    # 4. 盲读协议与打分表
-    random.seed(20261104)
-    shuffled = list(range(1, 6))
-    random.shuffle(shuffled)
-    mapping = {i + 1: shuffled[i] for i in range(5)}
-    protocol = f"""# 盲读 A/B 验收（质量升级方案 §8）
-
-- 日期：{time.strftime('%Y-%m-%d %H:%M')}
-- variant A：WRITING_PIPELINE_V2=false（现状）；variant B：WRITING_PIPELINE_V2=true（改造后）
-- 细纲固定：冲突 / 过渡 / 情绪 / 信息 / 群像 各 1 章
-- 评审 {len([r for r in results if r[1]])} 章 A/B 配对
-
-## 随机编号对照（评审时只看编号，不看 A/B 标签）
-
-| 编号 | 章节 | 实际文件 |
-|---|---|---|
-"""
-    for num, ch in mapping.items():
-        protocol += f"| {num} | 第{ch}章 | {args.variant}_ch{ch}.md |\n"
-    protocol += """
-## 评分表（每位评审独立填写）
-
-对每个编号回答：
-1. 更像人写的：____（编号）
-2. 自然度（1-5）：____
-3. 细节感（1-5）：____
-4. 可读性（1-5）：____
-5. 是否像 AI 写的：是 / 否
-
-## 通过标准（§8.2）
-- B 的自然度中位数 ≥ 3.5
-- B 被判为"AI 写"的比例 ≤ 50%
-- 评审 ≥ 2 人，分歧 > 1 分时加第三人
-"""
-    (out_dir / "protocol.md").write_text(protocol, encoding="utf-8")
-
     print("\n>>> 完成摘要:", json.dumps(
         {"variant": args.variant, "novel_id": novel_id,
          "results": results, "out": str(out_dir)}, ensure_ascii=False, indent=2))
+    print(">>> 两个变体都生成后，运行 --finalize 生成盲读评审包")
+
+
+def cmd_finalize(args):
+    """把 A/B 两个变体的 10 章随机编号为 01~10，产出无标签评审包 + 答案对照 + 评分表。"""
+    out_dir = Path(args.out)
+    chapters = []
+    for variant in ("A", "B"):
+        for n in range(1, 6):
+            p = out_dir / f"{variant}_ch{n}.md"
+            if not p.exists():
+                print(f"[finalize] 缺少 {p.name}，请先完成两个变体的生成")
+                sys.exit(1)
+            content = p.read_text(encoding="utf-8")
+            # 去掉文件里可能残留的变体痕迹（正文标题不含变体，保险起见替换）
+            chapters.append((variant, n, content))
+
+    random.seed(20261105)
+    order = list(range(len(chapters)))
+    random.shuffle(order)
+
+    review_dir = out_dir / "评审包"
+    review_dir.mkdir(parents=True, exist_ok=True)
+    answer_lines = ["# A/B 答案对照（仅组织者查看）", "编号 -> (变体, 章节)"]
+    score_lines = ["# 盲读评分表（评审人填写）", "",
+                   "说明：01~10 号对应 10 章（A/B 随机打乱）。请独立完成，勿与他人对答案。",
+                   "通过标准（§8.2）：B 自然度中位数 ≥ 3.5；B 被判'AI写'比例 ≤ 50%；评审 ≥ 2 人。", ""]
+    for code, idx in enumerate(order, start=1):
+        variant, n, content = chapters[idx]
+        code_name = f"{code:02d}.md"
+        (review_dir / code_name).write_text(content, encoding="utf-8")
+        answer_lines.append(f"{code:02d} -> {variant} 第{n}章")
+        score_lines.append(
+            f"### 编号 {code:02d}（第{n}章）\n"
+            f"- 更像人写的编号：____\n"
+            f"- 自然度(1-5)：____  细节感(1-5)：____  可读性(1-5)：____\n"
+            f"- 是否像 AI 写的：是 / 否\n"
+        )
+    (out_dir / "答案对照.txt").write_text("\n".join(answer_lines) + "\n", encoding="utf-8")
+    (out_dir / "评分表.md").write_text("\n".join(score_lines) + "\n", encoding="utf-8")
+    print(f">>> 评审包已生成：{review_dir}/（{len(chapters)} 章，编号 01~10）")
+    print(f">>> 答案对照：{out_dir / '答案对照.txt'}（组织者查看，勿给评审人）")
+    print(f">>> 评分表：{out_dir / '评分表.md'}")
 
 
 if __name__ == "__main__":
-    main()
+    parser = argparse.ArgumentParser(description="盲读 A/B 验收生成")
+    parser.add_argument("--variant", choices=["A", "B"])
+    parser.add_argument("--finalize", action="store_true", help="生成盲读评审包（A/B 都已生成后运行）")
+    parser.add_argument("--backend", default="http://127.0.0.1:8080")
+    parser.add_argument("--user", default="")
+    parser.add_argument("--password", default="Test123")
+    parser.add_argument("--out", default="blind_ab")
+    parser.add_argument("--novel", type=int, default=None)
+    parser.add_argument("--style", default=DEFAULT_STYLE)
+    args = parser.parse_args()
+
+    if args.finalize:
+        cmd_finalize(args)
+    else:
+        if not args.variant or not args.user:
+            parser.error("生成模式需要 --variant A|B 与 --user")
+        main(args)
