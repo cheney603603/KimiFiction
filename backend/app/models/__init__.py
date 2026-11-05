@@ -11,6 +11,7 @@ from app.models.memory_node import MemoryNode
 from app.models.entity import Entity, EntityRelationship
 from app.models.feedback import ChapterFeedback, FrameworkAdjustment, WritingSession
 from app.models.user_llm_config import UserLLMConfig
+from app.models.llm_usage_log import LLMUsageLog
 from app.models.rubric import (
     RubricTemplate,
     RubricDimension,
@@ -42,4 +43,5 @@ __all__ = [
     "ComparisonReport",
     "SampledEvaluationHistory",
     "UserLLMConfig",
+    "LLMUsageLog",
 ]

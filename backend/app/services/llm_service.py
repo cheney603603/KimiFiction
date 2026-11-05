@@ -12,6 +12,7 @@ import json
 import asyncio
 import os
 import re
+import time
 from typing import Optional, Dict, Any, List, AsyncGenerator
 from enum import Enum
 from loguru import logger
@@ -22,6 +23,50 @@ from app.core.llm_config_manager import llm_config, LLMConfigManager
 
 # P0-2: DeepSeek json_object 支持探测标志（None=未知，True=支持，False=网关不支持已降级）
 _deepseek_json_mode_supported: Optional[bool] = None
+
+
+async def _record_llm_usage(
+    *,
+    model: str = "",
+    provider: str = "",
+    tokens_in: int = 0,
+    tokens_out: int = 0,
+    duration_ms: int = 0,
+    status: str = "success",
+    retry_count: int = 0,
+    error: str = "",
+) -> None:
+    """写入一条 LLM 用量记录（尽力而为，失败静默）。
+
+    归属字段来自上下文：user_id(user_context)、novel/chapter/agent(llm_call_tracker)。
+    """
+    try:
+        from app.core.database import get_session
+        from app.core.user_context import get_current_user_id
+        from app.core.llm_call_tracker import (
+            get_current_novel_id, get_current_chapter_number,
+            get_current_agent_name, get_current_phase,
+        )
+        from app.services.llm_usage_service import LLMUsageService
+
+        async with get_session() as db:
+            await LLMUsageService(db).record(
+                user_id=get_current_user_id(),
+                novel_id=get_current_novel_id(),
+                chapter_number=get_current_chapter_number(),
+                phase=get_current_phase(),
+                agent_name=get_current_agent_name() or "",
+                model=model,
+                provider=provider,
+                tokens_in=tokens_in,
+                tokens_out=tokens_out,
+                duration_ms=duration_ms,
+                status=status,
+                retry_count=retry_count,
+                error=error[:500],
+            )
+    except Exception:
+        pass
 
 
 class LLMProvider(str, Enum):
@@ -192,7 +237,9 @@ class LLMService:
         json_mode: bool = False,
         **kwargs
     ) -> str:
-        """发送聊天消息"""
+        """发送聊天消息（全局 RPM 限速入口）"""
+        from app.core.llm_rate_limiter import llm_rate_limiter
+        await llm_rate_limiter.acquire()
         if self.provider == LLMProvider.OPENAI:
             return await self._chat_openai(messages, json_mode, **kwargs)
         elif self.provider == LLMProvider.DEEPSEEK:
@@ -251,9 +298,30 @@ class LLMService:
                 bound_client = self.openai_client.bind(response_format={"type": "json_object"})
             else:
                 bound_client = self.openai_client
+            start_time = time.monotonic()
             response = await bound_client.ainvoke(langchain_messages)
-            return response.content
+            content = response.content or ""
+            usage_in = sum(len(m.get("content", "")) for m in messages)
+            usage_out = len(content)
+            try:
+                meta = response.response_metadata or {}
+                if meta.get("token_usage"):
+                    usage_in = int(meta["token_usage"].get("prompt_tokens", usage_in))
+                    usage_out = int(meta["token_usage"].get("completion_tokens", usage_out))
+            except Exception:
+                pass
+            await _record_llm_usage(
+                model=self.model, provider="openai",
+                tokens_in=usage_in, tokens_out=usage_out,
+                duration_ms=int((time.monotonic() - start_time) * 1000),
+                status="success", retry_count=0,
+            )
+            return content
         except Exception as e:
+            await _record_llm_usage(
+                model=self.model, provider="openai", tokens_in=0, tokens_out=0,
+                duration_ms=0, status="error", error=str(e)[:500],
+            )
             logger.error(f"OpenAI API调用失败: {e}")
             raise
     
@@ -275,14 +343,25 @@ class LLMService:
 
         config = LLMConfigManager.get_config()
 
-        api_key = os.environ.get("DEEPSEEK_API_KEY") or os.environ.get("LLM_API_KEY") or settings.DEEPSEEK_API_KEY
-        base_url = os.environ.get("DEEPSEEK_BASE_URL") or settings.DEEPSEEK_BASE_URL
+        # BYOK：优先使用有效配置（含用户自己的 Key/BaseURL），回落环境变量/默认
+        api_key = (
+            config.get("api_key")
+            or os.environ.get("DEEPSEEK_API_KEY")
+            or os.environ.get("LLM_API_KEY")
+            or settings.DEEPSEEK_API_KEY
+        )
+        base_url = (
+            config.get("base_url")
+            or os.environ.get("DEEPSEEK_BASE_URL")
+            or settings.DEEPSEEK_BASE_URL
+        )
 
         if not api_key:
             raise ValueError("未配置DeepSeek API Key! 请设置DEEPSEEK_API_KEY环境变量")
 
         model = self.model or settings.DEEPSEEK_MODEL
         timeout = config.get("timeout") or 120
+        provider = "deepseek"
 
         logger.info(f"[LLM] 调用DeepSeek API(流式): model={model}, base_url={base_url}, json_mode={bool(json_mode)}")
         # 对网关限流/过载(429/5xx)做指数退避重试，保证长时间批量生成稳定。
@@ -296,6 +375,8 @@ class LLMService:
         if want_json_mode and _deepseek_json_mode_supported is False:
             want_json_mode = False
 
+        start_time = time.monotonic()
+        last_error = ""
         for attempt in range(1, retries + 1):
             payload = {
                 "model": model,
@@ -306,6 +387,7 @@ class LLMService:
                 "temperature": self.temperature,
                 "max_tokens": self.max_tokens,
                 "stream": True,
+                "stream_options": {"include_usage": True},
             }
             if want_json_mode:
                 payload["response_format"] = {"type": "json_object"}
@@ -332,6 +414,8 @@ class LLMService:
                                 f"DeepSeek API 返回 HTTP {resp.status_code}: {body[:300]}"
                             )
                         content = ""
+                        usage_in = 0
+                        usage_out = 0
                         async for line in resp.aiter_lines():
                             if not line or not line.startswith("data:"):
                                 continue
@@ -343,6 +427,9 @@ class LLMService:
                             except json.JSONDecodeError:
                                 continue
                             choices = chunk.get("choices", [{}])
+                            if chunk.get("usage"):
+                                usage_in = int(chunk["usage"].get("prompt_tokens", 0))
+                                usage_out = int(chunk["usage"].get("completion_tokens", 0))
                             if not choices:
                                 continue
                             delta = choices[0].get("delta", {}).get("content")
@@ -350,19 +437,37 @@ class LLMService:
                                 content += delta
                 if want_json_mode and _deepseek_json_mode_supported is None:
                     _deepseek_json_mode_supported = True
+                # 用量估算：网关未返回 usage 时按字符粗估
+                if not usage_out:
+                    usage_in = sum(len(m.get("content", "")) for m in messages)
+                    usage_out = len(content)
+                await _record_llm_usage(
+                    model=model, provider=provider,
+                    tokens_in=usage_in, tokens_out=usage_out,
+                    duration_ms=int((time.monotonic() - start_time) * 1000),
+                    status="success", retry_count=attempt - 1,
+                )
                 return content.strip()
             except _RetryableLLMError as e:
                 backoff = min(2 ** attempt, backoff_max)
+                last_error = str(e)[:300]
                 logger.warning(f"[LLM] 网关过载({e})，{backoff}s后重试 ({attempt}/{retries})")
                 await asyncio.sleep(backoff)
                 continue
             except httpx.HTTPStatusError:
                 raise
             except (httpx.TransportError, httpx.TimeoutException, httpx.ConnectError):
+                last_error = str(e)[:300]
                 if attempt >= retries:
-                    raise
+                    break
                 await asyncio.sleep(min(2 ** attempt, 60))
                 continue
+        await _record_llm_usage(
+            model=model, provider=provider,
+            tokens_in=0, tokens_out=0,
+            duration_ms=int((time.monotonic() - start_time) * 1000),
+            status="error", retry_count=retries, error=last_error or "重试均失败",
+        )
         raise RuntimeError("DeepSeek API 重试均失败")
     
     async def _chat_local_qwen(

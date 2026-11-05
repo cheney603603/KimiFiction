@@ -21,6 +21,21 @@ from app.core.state_snapshot import (
 # 当前小说ID上下文（用于自动关联）
 current_novel_id: ContextVar[Optional[int]] = ContextVar("current_novel_id", default=None)
 current_chapter_number: ContextVar[Optional[int]] = ContextVar("current_chapter_number", default=None)
+# 当前 Agent / 阶段（2026-11-05 用量统计用）
+current_agent_name: ContextVar[Optional[str]] = ContextVar("current_agent_name", default=None)
+current_phase: ContextVar[Optional[str]] = ContextVar("current_phase", default=None)
+
+
+def set_phase_context(phase: Optional[str]):
+    current_phase.set(phase)
+
+
+def get_current_phase() -> Optional[str]:
+    return current_phase.get()
+
+
+def set_agent_context(agent: Optional[str]):
+    current_agent_name.set(agent)
 
 
 @dataclass
@@ -84,6 +99,7 @@ class LLMCallTracker:
     
     async def __aenter__(self):
         """进入上下文 - 创建快照"""
+        set_agent_context(self.agent_name)
         if not self.novel_id:
             logger.warning("[LLMTracker] 未设置novel_id，跳过快照")
             return self
@@ -144,7 +160,8 @@ class LLMCallTracker:
         
         # 记录调用日志
         self._log_call(call_record)
-    
+        set_agent_context(None)
+
     def record_input(self, messages: List[Dict[str, Any]]):
         """记录输入消息"""
         self.input_messages = messages

@@ -1011,6 +1011,12 @@ class WorkflowEngine:
         if not self.state:
             await self.create_state()
 
+        # 用量统计归属：标记当前阶段与小说（llm_service 记录用量时读取）
+        from app.core.llm_call_tracker import set_phase_context, set_novel_context, set_agent_context
+        set_phase_context(phase.value)
+        set_novel_context(self.novel_id)
+        set_agent_context(None)
+
         # 获取上一阶段的数据并合并到输入中
         prev_data = await self._get_previous_phase_data(phase)
         if prev_data:

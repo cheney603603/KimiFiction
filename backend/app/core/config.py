@@ -102,6 +102,10 @@ class Settings(BaseSettings):
     PRO_BATCH_ENABLED: bool = Field(default=True, description="批量管线(Pro)总开关")
     # Pro 用户同时可进行的章节生成数（free 固定为 1）
     PRO_CONCURRENCY: int = Field(default=4, description="Pro 用户章节生成并发上限")
+
+    # ── LLM 用量与限速（2026-11-05）──
+    # 全局速率限制（RPM，滑动窗口）。0 = 不限速。默认 40 防止并发把网关打爆。
+    LLM_RPM_LIMIT: int = Field(default=40, description="全局 LLM 请求速率上限(次/分钟), 0=不限")
     
     # 记忆管理配置
     WORKING_MEMORY_CHAPTERS: int = Field(default=3, description="工作记忆章节数")

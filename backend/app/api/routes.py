@@ -10,6 +10,7 @@ from app.api.endpoints import (
 )
 from app.api.endpoints import evaluation_optimizer
 from app.api.endpoints import quota
+from app.api.endpoints import usage
 
 # 创建主路由
 api_router = APIRouter(prefix="/api/v1")
@@ -30,3 +31,4 @@ api_router.include_router(entities.router, prefix="/entities", tags=["实体管�
 api_router.include_router(snapshots.router, tags=["快照管理"])
 api_router.include_router(evaluation_optimizer.router, tags=["评测规则优化"])
 api_router.include_router(quota.router, prefix="/quota", tags=["额度墙"])
+api_router.include_router(usage.router, prefix="/usage", tags=["LLM用量"])

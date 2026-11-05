@@ -220,13 +220,27 @@ def main(args):
     api(base, "PUT", f"/workflow/chapter-outlines/{novel_id}",
         {"chapter_outlines": FIXED_OUTLINES}, token=token)
 
-    # 3. 逐章生成
+    # 3. 逐章生成（--parallel N 并行多个章节；受后端全局 RPM 限速保护，不会打爆网关）
+    from concurrent.futures import ThreadPoolExecutor
+
     results = []
-    for outline in FIXED_OUTLINES:
-        n = outline["chapter_number"]
-        out_path = out_dir / f"{args.variant}_ch{n}.md"
-        ok = generate_one(base, token, novel_id, outline, args.style, out_path)
-        results.append((n, ok))
+    if args.parallel > 1:
+        print(f">>> 并行生成 {args.parallel} 章并发（全局 RPM 限速保护）")
+        with ThreadPoolExecutor(max_workers=args.parallel) as pool:
+            futures = {}
+            for outline in FIXED_OUTLINES:
+                n = outline["chapter_number"]
+                out_path = out_dir / f"{args.variant}_ch{n}.md"
+                f = pool.submit(generate_one, base, token, novel_id, outline, args.style, out_path)
+                futures[f] = n
+            for f in futures:
+                results.append((futures[f], f.result()))
+    else:
+        for outline in FIXED_OUTLINES:
+            n = outline["chapter_number"]
+            out_path = out_dir / f"{args.variant}_ch{n}.md"
+            ok = generate_one(base, token, novel_id, outline, args.style, out_path)
+            results.append((n, ok))
 
     print("\n>>> 完成摘要:", json.dumps(
         {"variant": args.variant, "novel_id": novel_id,
@@ -286,6 +300,7 @@ if __name__ == "__main__":
     parser.add_argument("--out", default="blind_ab")
     parser.add_argument("--novel", type=int, default=None)
     parser.add_argument("--style", default=DEFAULT_STYLE)
+    parser.add_argument("--parallel", type=int, default=1, help="并发生成的章节数(默认1, 建议≤4)")
     args = parser.parse_args()
 
     if args.finalize:
