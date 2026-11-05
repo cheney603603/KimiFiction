@@ -125,8 +125,8 @@ def extract_status(prog):
     return prog.get("status") or prog.get("state")
 
 
-def poll_chapter(base, token, novel_id, chapter_number, task_id, max_wait=60 * 60):
-    """轮询直到章节入库或任务失败。"""
+def poll_chapter(base, token, novel_id, chapter_number, task_id, max_wait=10 * 60):
+    """轮询直到章节入库；任务已终态但章节未出现 → 立即返回 None（不再干等）。"""
     waited = 0
     wait = 15
     while waited < max_wait:
@@ -140,7 +140,14 @@ def poll_chapter(base, token, novel_id, chapter_number, task_id, max_wait=60 * 6
             prog = api(base, "GET", f"/workflow/task-progress/{task_id}", token=token)
         except Exception:
             prog = {}
-        if extract_status(prog) in ("failed", "error"):
+        # 终态判定：任务级或任一 step 进入 completed/failed/error，但章节未出现 → 本次生成失败
+        terminal = {"completed", "failed", "error"}
+        step_statuses = [s.get("status") for s in (prog or {}).get("steps", {}).values() if isinstance(s, dict)]
+        is_terminal = (
+            extract_status(prog) in terminal
+            or any(st in terminal for st in step_statuses)
+        )
+        if is_terminal:
             return None
         time.sleep(wait)
         waited += wait
