@@ -7,6 +7,7 @@ import {
 } from 'lucide-react'
 import { novelApi, chapterApi, exportApi, worldApi } from '../services/api'
 import { NovelNav } from '../components/NovelNav'
+import { NovelModelCard } from '../components/NovelModelCard'
 
 export function NovelDetail() {
   const { novelId } = useParams<{ novelId: string }>()
@@ -212,6 +213,9 @@ export function NovelDetail() {
           </Link>
         ))}
       </div>
+
+      {/* 本书模型：单书级覆盖（三层回落） */}
+      <NovelModelCard novelId={id} />
 
       {/* 最近章节 */}
       <div className="bg-white dark:bg-gray-800 rounded-xl shadow-sm border border-gray-200 dark:border-gray-700">

@@ -497,7 +497,8 @@ async def _execute_phase_with_progress(
     phase: WorkflowPhase,
     input_data: dict,
     tracker: ProgressTracker,
-    timeout: Optional[int] = None
+    timeout: Optional[int] = None,
+    user_ctx: Optional[dict] = None,
 ):
     """在后台执行阶段并跟踪进度"""
     step_id = f"phase_{phase.value}"
@@ -508,6 +509,18 @@ async def _execute_phase_with_progress(
         total_substeps=4
     )
     tracker.set_current_step(step_id)
+
+    # 恢复发起请求用户的 BYOK 上下文 + 小说级模型覆盖（三层回落）
+    if user_ctx:
+        from app.core.user_context import apply
+        apply(user_ctx)
+    try:
+        from app.core.database import get_session
+        from app.services.novel_model_service import apply_novel_model_override
+        async with get_session() as _sess:
+            await apply_novel_model_override(novel_id, _sess)
+    except Exception:
+        pass
 
     try:
         # 步骤1: 初始化引擎
@@ -593,6 +606,10 @@ async def execute_workflow_phase(
         # 创建进度追踪器
         tracker = get_progress_tracker(task_id)
 
+        # 捕获用户上下文（后台任务脱离 HTTP 中间件作用域，需手动恢复 BYOK + 小说级覆盖）
+        from app.core.user_context import capture
+        _user_ctx = capture()
+
         # 在后台执行
         phase = WorkflowPhase(request.phase)
         background_tasks.add_task(
@@ -601,7 +618,8 @@ async def execute_workflow_phase(
             phase,
             request.input_data,
             tracker,
-            request.timeout  # 传递超时参数
+            request.timeout,  # 传递超时参数
+            _user_ctx,
         )
 
         # 立即返回任务ID，前端可以用它来轮询进度
@@ -652,20 +670,15 @@ async def write_chapter(
     task_id = f"novel_{novel_id}_chapter_{request.chapter_number}_{int(asyncio.get_event_loop().time())}"
     
     try:
-        # 快速检查：章节细纲是否存在
+        # 快速检查：章节细纲是否存在（缺失时后台任务自动补全，不再硬卡 400）
         engine = await get_workflow_engine(novel_id)
         chapter_outline = None
         for co in (engine.state.chapter_outlines or []):
             if isinstance(co, dict) and co.get("chapter_number") == request.chapter_number:
                 chapter_outline = co
                 break
-        
-        if not chapter_outline or not chapter_outline.get("summary"):
-            raise HTTPException(
-                status_code=400,
-                detail=f"第{request.chapter_number}章缺少有效的章节细纲，无法撰写。请先在「工作流」->「章节细纲」阶段完成本章细纲设计。"
-            )
-        
+        outline_missing = not chapter_outline or not chapter_outline.get("summary")
+
         tracker = get_progress_tracker(task_id)
         step = tracker.add_step(
             step_id="write_chapter",
@@ -674,7 +687,7 @@ async def write_chapter(
             total_substeps=3
         )
         tracker.set_current_step("write_chapter")
-        
+
         # 构造写作参数
         writing_params = {
             "writing_style": request.writing_style,
@@ -682,16 +695,39 @@ async def write_chapter(
             "dialogue_ratio": request.dialogue_ratio if request.dialogue_ratio is not None else 0.3,
             "notes": request.notes,
         }
-        
+
         async def _write():
             # 恢复发起请求用户的 BYOK 上下文（本任务是 BackgroundTask，不在中间件作用域内）
             apply(_user_ctx)
+            # 小说级模型覆盖（三层回落：小说 > 用户BYOK > 全局）
+            try:
+                from app.core.database import get_session
+                from app.services.novel_model_service import apply_novel_model_override
+                async with get_session() as _sess:
+                    await apply_novel_model_override(novel_id, _sess)
+            except Exception:
+                pass
             # 并发限制：同用户生成数不超过 _gen_limit
             await wait_turn(_user_ctx.get("user_id"), _gen_limit)
             try:
                 await tracker.update_substep("write_chapter", 1, "初始化写作引擎...")
                 engine = await get_workflow_engine(novel_id)
-                
+
+                # 缺细纲：先自动补全本章细纲（写作直达路径的兜底，不要求先跑完整工作流）
+                if outline_missing:
+                    await tracker.update_substep("write_chapter", 1, "本章缺少细纲，自动补全中...")
+                    from app.api.endpoints.workflow_helpers import auto_complete_chapter_outline
+                    co = await auto_complete_chapter_outline(engine, novel_id, request.chapter_number)
+                    if not co:
+                        await tracker.fail_step(
+                            "write_chapter",
+                            "自动补全细纲失败：请先在「AI 创作助手」的章节细纲阶段完成本章细纲设计",
+                        )
+                        return
+                    engine.state.chapter_outlines.append(co)
+                    await engine.save_state()
+                    await tracker.add_log("write_chapter", f"已自动补全第{request.chapter_number}章细纲", "info")
+
                 await tracker.update_substep("write_chapter", 2, "调用AI撰写章节...")
                 # 设置超时（章节写作可能需要更长时间）
                 base_timeout = llm_config.get_timeout()

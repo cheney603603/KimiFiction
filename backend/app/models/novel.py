@@ -55,9 +55,14 @@ class Novel(Base):
     
     # 类型分析结果（JSON存储）
     genre_analysis: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="类型分析结果JSON")
-    
+
     # 世界观设定（JSON存储）
     world_setting: Mapped[Optional[str]] = mapped_column(Text, nullable=True, comment="世界观设定JSON")
+
+    # 单书模型覆盖（三层回落：小说 > 用户BYOK > 全局，见 novel_model_service）
+    model_provider: Mapped[Optional[str]] = mapped_column(String(30), nullable=True, default=None, comment="本书模型 provider 覆盖")
+    model_name: Mapped[Optional[str]] = mapped_column(String(100), nullable=True, default=None, comment="本书模型名覆盖")
+    model_base_url: Mapped[Optional[str]] = mapped_column(String(255), nullable=True, default=None, comment="本书 base_url 覆盖")
     
     # 软删除标记
     is_deleted: Mapped[bool] = mapped_column(default=False, comment="是否已删除")

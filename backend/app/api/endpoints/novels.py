@@ -115,6 +115,40 @@ async def hard_delete_novel(
     return result
 
 
+@router.get("/{novel_id}/llm-config")
+async def get_novel_llm_config(
+    novel_id: int,
+    db: AsyncSession = Depends(get_db),
+    _current_user: dict = Depends(require_auth),
+):
+    """小说实际生效的 LLM 配置（三层回落解析结果，供前端展示当前模型）。"""
+    service = NovelService(db)
+    novel = await service.get_novel(novel_id)
+    if not novel:
+        raise HTTPException(status_code=404, detail="小说不存在")
+
+    from app.core.llm_config_manager import LLMConfigManager
+    from app.core.user_context import get_user_config_snapshot, set_novel_config_snapshot
+    from app.services.novel_model_service import build_novel_override
+
+    override = build_novel_override(novel)
+    set_novel_config_snapshot(override)
+    try:
+        cfg = LLMConfigManager.get_config()
+    finally:
+        set_novel_config_snapshot(None)
+
+    user_snap = get_user_config_snapshot() or {}
+    return {
+        "provider": cfg.get("provider", ""),
+        "model": cfg.get("model", ""),
+        "base_url": cfg.get("base_url", ""),
+        "has_api_key": bool(cfg.get("api_key")),
+        "uses_user_key": bool(user_snap.get("api_key")),
+        "novel_override": bool(override),
+    }
+
+
 @router.get("/{novel_id}/stats")
 async def get_novel_stats(
     novel_id: int,

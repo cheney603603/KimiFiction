@@ -90,14 +90,18 @@ export const novelApi = {
   create: (data: { title: string; genre?: string; style_prompt?: string }) =>
     api.post('/novels', data),
   
-  update: (id: number, data: Partial<{ title: string; genre: string; status: string }>) =>
+  update: (id: number, data: Partial<{ title: string; genre: string; status: string; model_provider: string; model_name: string; model_base_url: string }>) =>
     api.put(`/novels/${id}`, data),
-  
+
   delete: (id: number) =>
     api.delete(`/novels/${id}`),
-  
+
   getStats: (id: number) =>
     api.get(`/novels/${id}/stats`),
+
+  // 小说实际生效的 LLM 配置（三层回落解析）
+  llmConfigForNovel: (id: number) =>
+    api.get(`/novels/${id}/llm-config`),
 
   hardDelete: (id: number) =>
     api.delete(`/novels/${id}/hard`),

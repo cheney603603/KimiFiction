@@ -30,6 +30,10 @@ class NovelUpdate(BaseModel):
     status: Optional[str] = None
     target_chapters: Optional[int] = Field(None, ge=1, le=1000)
     words_per_chapter: Optional[int] = Field(None, ge=500, le=10000)
+    # 单书模型覆盖（三层回落：小说 > 用户BYOK > 全局）
+    model_provider: Optional[str] = Field(None, max_length=30, description="本书模型 provider 覆盖（openai/deepseek/kimi/yuanbao）")
+    model_name: Optional[str] = Field(None, max_length=100, description="本书模型名覆盖")
+    model_base_url: Optional[str] = Field(None, max_length=255, description="本书 base_url 覆盖")
 
 
 class NovelResponse(NovelBase):
@@ -41,7 +45,11 @@ class NovelResponse(NovelBase):
     status: str
     created_at: datetime
     updated_at: datetime
-    
+    # 单书模型覆盖（三层回落：小说 > 用户BYOK > 全局）
+    model_provider: Optional[str] = None
+    model_name: Optional[str] = None
+    model_base_url: Optional[str] = None
+
     class Config:
         from_attributes = True
 

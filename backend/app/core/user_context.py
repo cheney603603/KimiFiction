@@ -11,6 +11,10 @@ _current_user_id: ContextVar[Optional[int]] = ContextVar("current_user_id", defa
 _user_config_snapshot: ContextVar[Optional[Dict[str, Any]]] = ContextVar(
     "user_llm_config_snapshot", default=None
 )
+# 小说级模型覆盖（三层回落：小说 > 用户BYOK > 全局），由小说相关生成入口设置
+_novel_config_snapshot: ContextVar[Optional[Dict[str, Any]]] = ContextVar(
+    "novel_llm_config_snapshot", default=None
+)
 # 用量归属（novel_id / chapter_number / phase），由工作流边界设置，供 LLM 用量日志记录
 _usage_meta: ContextVar[Optional[Dict[str, Any]]] = ContextVar("llm_usage_meta", default=None)
 
@@ -22,6 +26,16 @@ def get_current_user_id() -> Optional[int]:
 def get_user_config_snapshot() -> Optional[Dict[str, Any]]:
     """当前用户已解析的 LLM 配置快照（仅含用户显式设置过的字段）。"""
     return _user_config_snapshot.get()
+
+
+def set_novel_config_snapshot(snapshot: Optional[Dict[str, Any]]) -> None:
+    """设置小说级 LLM 配置覆盖快照（当前上下文，随协程传播）。"""
+    _novel_config_snapshot.set(snapshot)
+
+
+def get_novel_config_snapshot() -> Optional[Dict[str, Any]]:
+    """读取小说级 LLM 配置覆盖快照。"""
+    return _novel_config_snapshot.get()
 
 
 def get_usage_meta() -> Optional[Dict[str, Any]]:

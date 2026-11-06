@@ -163,3 +163,13 @@ model=deepseek-flash provider=deepseek status=success
 - 导航：`番茄榜单`（Flame）/ `用量看板`（Gauge）已加入 Layout；路由 `App.tsx` 已挂 `/rank`、`/usage`。
 - 单元测试：`backend/tests/test_rank.py` 新增 9 个（decode / fetch_rank 字段变换与回落 / categories 分组 / by_model 聚合），不触网全过。
 - `test_entity_e2e.py` 增加 `trust_env=False`：本机系统代理（127.0.0.1:7897）会令 httpx 把 localhost 请求导向代理返回 502，显式禁用后 e2e 34 过。
+
+**P1 创作链路修复 + 模型管理（2026-11-06）**
+
+1. **创作路径不再硬卡**：`/workflow/chapter/{id}` 遇到缺细纲时，后台自动补全本章细纲再写（`workflow_helpers.auto_complete_chapter_outline`），不再 400；LLM 不可用时优雅失败并给明确提示。实测：无细纲小说直接返回任务 ID，日志「本章缺少细纲，自动补全中...」。
+2. **实体/地图自动维护**：确认引擎 `workflow_engine.write_chapter` 成功后已自动抽取实体/关系并写入实体库（小说地图/图谱自动反映）。之前「有章节无实体」的是 A/B 脚本直写的数据，走的是绕过管道的路径。
+3. **单书模型三级回落**：novels 表新增 `model_provider/model_name/model_base_url`；解析优先级 **小说覆盖 > 用户 BYOK > 全局**（`novel_model_service` + `LLMConfigManager.get_config`）。新增 `GET /novels/{id}/llm-config` 展示实际生效配置；小说详情页新增「本书模型」卡片配置。实测：novel9 覆盖 deepseek-chat 后生效配置变为 `deepseek / deepseek-chat / api.deepseek.com`（novel_override=true）。
+4. **API 配置页重做（参考 WeKnora ModelSettings）**：卡片式提供商网格（图标徽章/模型/BaseURL/已配置标签/悬浮操作）+「当前生效模型」条（来源徽章 我的Key/全局默认）+ 测试日志终端。
+5. **「创作走不通」根因**：全局默认模型 `DeepSeek-V4-Flash`（ai-infra 网关）当前**无可用渠道**（`model_not_found` 503）→ 所有生成失败。修复路径：在 API 配置页配个人可用 Key，或在「本书模型」给单本覆盖到可用模型。
+
+新增测试：`tests/test_novel_model.py`（覆盖构建/三级回落）。

@@ -14,7 +14,7 @@ from typing import Optional, Dict, Any
 from dotenv import load_dotenv
 from loguru import logger
 
-from app.core.user_context import get_user_config_snapshot
+from app.core.user_context import get_user_config_snapshot, get_novel_config_snapshot
 
 # 确保环境变量在模块加载时就读取 .env
 load_dotenv(verbose=True)
@@ -91,6 +91,22 @@ class LLMConfigManager:
         user_snapshot = get_user_config_snapshot()
         if user_snapshot:
             config.update(user_snapshot)
+
+        # 小说级覆盖（三层回落：小说 > 用户BYOK > 全局）：由小说生成入口设置
+        novel_snapshot = get_novel_config_snapshot()
+        if novel_snapshot:
+            prev_provider = config.get("provider")
+            config.update(novel_snapshot)
+            # 切换提供商时，用户 BYOK Key 属于原提供商不再适用 → 回落全局该提供商 Key/环境变量
+            new_provider = novel_snapshot.get("provider")
+            if new_provider and prev_provider and new_provider != prev_provider:
+                config["api_key"] = (
+                    _global_config.get("api_key")
+                    or os.getenv("DEEPSEEK_API_KEY")
+                    or os.getenv("OPENAI_API_KEY")
+                    or os.getenv("LLM_API_KEY")
+                    or ""
+                )
 
         return config
 
