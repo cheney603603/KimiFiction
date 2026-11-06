@@ -1,0 +1,205 @@
+URL: https://www.baidu.com/
+
+url: https://www.baidu.com/
+title: 百度一下，你就知道
+viewport: 1264x715
+---
+<body /><textarea id=s_is_result_css value=<style data-for="result" type="text/css" >html{font-size:100px}html body{font-size:.14rem;font-size:14px}body{color:#333…><style data-for="result" type="text/css" >html{font-size:100px}html body{font-size:.14rem;font-size:14px}body{color:#333…</textarea><textarea id=s_index_off_css value=<style data-for="result" id="css_result" type="text/css">#ftCon{display:none} #qrcode{display:none} #pad-version{display…><style data-for="result" id="css_result" type="text/css">#ftCon{display:none} #qrcode{display:none} #pad-version{display…</textarea>
+  <div id=wrapper />
+    <div id=head />
+      <div />
+        <div id=s-top-bar />
+          <div id=s-top-left />
+            <div /><a href=http://news.baidu.com>新闻</a><a href=https://www.hao123.com?src=from_pc_logon>hao123</a><a href=http://map.baidu.com>地图</a><a href=http://tieba.baidu.com/>贴吧</a><a href=https://haokan.baidu.com/?sfrom=baidu-top>视频</a><a href=http://image.baidu.com/>图片</a><a href=https://pan.baidu.com?from=1026962h>网盘</a><a href=https://kuku.baidu.com/app?utm_source=baidu>库库AI</a><a href=https://chat.baidu.com/search?isShowHello=1&pd=csaitab&setype=csaitab&extParamsJson=%7B%22enter_type… id=csaitab>文心</a><a href=https://dumate.baidu.com/app/login-bridge?track=1063479e&isLogin=1>百度搭子</a>
+            <div /><a href=http://www.baidu.com/more/ name=tj_briicon>更多</a>
+              <div id=s-top-more />
+                <div /><a href=http://fanyi.baidu.com/ name=tjfanyi /><img src=https://pss.bdstatic.com/static/superman/img/topnav/newfanyi-da0cea8f7e.png /><div>翻译</div>
+                <div /><a href=https://wenku.baidu.com/?fr=bdpcindex name=tjwenku /><img src=https://psstatic.cdn.bcebos.com/basics/superman/wenku_1788235315000.png /><div>文库</div>
+                <div /><a href=https://baike.baidu.com name=tjbaike /><img src=https://pss.bdstatic.com/static/superman/img/topnav/newbaike-889054f349.png /><div>百科</div>
+                <div /><a href=https://zhidao.baidu.com name=tjzhidao /><img src=https://pss.bdstatic.com/static/superman/img/topnav/newzhidao-da1cf444b0.png /><div>知道</div>
+                <div /><a href=https://jiankang.baidu.com/widescreen/home name=tjjiankang /><img src=https://pss.bdstatic.com/static/superman/img/topnav/newjiankang-f03b804b4b.png /><div>健康</div>
+                <div /><a href=http://e.baidu.com/ebaidu/home?refer=887 name=tjyingxiaotuiguang /><img src=https://pss.bdstatic.com/static/superman/img/topnav/yingxiaoicon-612169cc36.png /><div>营销推广</div>
+                <div /><a href=https://live.baidu.com/ name=tjlive /><img src=https://pss.bdstatic.com/static/superman/img/topnav/newzhibo-a6a0831ecd.png /><div>直播</div>
+                <div /><a href=http://music.taihe.com name=tjmp3 /><img src=https://pss.bdstatic.com/static/superman/img/topnav/newyinyue-03ecd1e9b9.png /><div>音乐</div>
+                <div /><a href=https://xueshu.baidu.com/ name=tjxueshu /><img src=https://pss.bdstatic.com/static/superman/img/topnav/newxueshuicon-a5314d5c83.png /><div>学术</div>
+                <div /><a href=http://www.baidu.com/more/ name=tj_more />
+                    查看全部百度产品<i />
+          <div id=u1 />
+            <div />
+              <div id=s_mod_weather />
+                <div /><a href=/s?tn=baidutop10&rsv_idx=2&rsv_dl=iweather&wd=%E4%B8%8A%E6%B5%B7%E5%A4%A9%E6%B0%94%E9%A2%84%E6%8A%A5 />
+                    <div />
+                      <span />
+                        <span>嘉定</span>
+                      <span />
+                        <span>17°</span><span />
+                  <div />
+                    <span />
+                      <span>良</span>
+                <div />
+                  <span></span>
+                  <span>查看天气信息</span><a />
+              <div />
+                <div />
+                  <div>通知</div><span id=s-usersetting-top name=tj_settingicon>设置</span><a id=s-top-username href=/my/index />
+              <span>CheneyRL</span>
+            <div id=s-user-name-menu /><a href=/my/index>个人中心</a><a href=http://passport.baidu.com/>账号设置</a><a>切换账号</a><a>退出登录</a>
+            <div id=s-user-setting-menu /><a>隐藏热搜</a><a>展示热搜</a><a>更换皮肤</a>
+            <div />
+              <i></i>
+              <span>新春焕新肤，设置后即可拥有！</span><i></i>
+      <div id=head_wrapper />
+        <div id=s_fm />
+          <div id=s_form_wrapper />
+            <div id=lg />
+              <map name=mp id=s_mp /><area href=/s?wd=%E7%99%BE%E5%BA%A6%E7%83%AD%E6%90%9C&sa=ire_dl_gh_logo_texing&rsv_dl=igh_logo_pc title=点击一下，了解更多 /><a href=/ id=result_logo /><img src=//www.baidu.com/img/flexible/logo/pc/result.png alt=到百度首页 title=到百度首页 /><img src=//www.baidu.com/img/flexible/logo/pc/result@2.png alt=到百度首页 title=到百度首页 /><img src=//www.baidu.com/img/flexible/logo/pc/peak-result.png alt=到百度首页 title=到百度首页 />
+            <div id=main-wrapper />
+              <div />
+                <div />
+                  <div id=input-root />
+                    <div />
+                      <div id=chat-input-main />
+                        <div />
+                          <div />
+                            <div id=chat-input-area /><textarea id=chat-textarea autocomplete=off placeholder=曝CBA豪斯有望加盟广东宏远 />
+                            <div />
+                              <div id=left-tool />
+                                <div />
+                                  <div>👈 复杂问题文心助手回答更优</div>
+                              <div />
+                                <div id=right-tool /><div /><svg />
+                                  <div id=voice-input-wrapper /><div /><div /><div /><div /><div /><div /><svg /><div />
+                                  <div />
+                                    <div /><div /><div /><div /><svg /><button id=chat-submit-button>百度一下</button>
+                      <div id=chat-input-extension />
+                        <div />
+                          <div /><div /><a href=https://wenxin.baidu.com/?extParams=%7B%22enter_type%22%3A%22home_operate%22%7D />
+                                <div />
+                                  <div>复杂问题就找文心助手，深入思考回答更优</div>
+                                  <i></i>
+            <form name=f id=form action=/s /><span id=s_kw_wrap /><input type=text name=wd id=kw maxlength=100 autocomplete=off /><i></i><input type=hidden name=rsv_spt value=1 /><input type=hidden name=rsv_iqid value=0xa9787cf201fa80e0 /><input type=hidden name=issp value=1 /><input type=hidden name=f value=8 /><input type=hidden name=rsv_bp value=1 /><input type=hidden name=rsv_idx value=2 /><input type=hidden name=ie value=utf-8 /><input type=hidden name=rqlang /><input type=hidden name=tn value=baiduhome_pg /><input type=hidden name=ch /><span id=s_btn_wr /><input type=submit value=百度一下 id=su />
+              <span />
+                <span id=mHolder /><div id=mCon />
+                    <span>输入法</span>
+                  <ul id=mMenu />
+                    <li /><a name=ime_hw>手写</a>
+                    <li /><a name=ime_py>拼音</a>
+                    <li /><a name=ime_cl>关闭</a><input type=hidden name=rsv_enter value=1 /><input type=hidden name=rsv_dl value=ib />
+        <div id=u /><a href=/>百度首页</a><a />
+            <div />
+              <div /><div>通知</div><a name=tj_settingicon />
+            设置<i /><a href=/my/index id=user /><span /><img src=https://himg.bdimg.com/sys/portraitn/item/public.1.4f378ef7.yyySK0CAnlQRqJYFOENK5Q?_d=29898909 /><span>CheneyRL</span>
+      <div id=s_wrap />
+        <div />
+          <div id=s_main />
+            <div id=s_mancard_main />
+              <div />
+                <div id=s_menu_gurd />
+                  <div id=s_ctner_menus />
+                    <div />
+                      <div id=s_menus_wrapper /><span id=s_menu_mine />
+                          我的常用<span /><span /><span /><span />
+              <div id=s-hotsearch-wrapper />
+                <div /><a href=https://top.baidu.com/board?platform=pc&sa=pcindex_entry&source=home_rebang /><div aria-label=百度热搜 />
+                      <i></i><a id=hotsearch-refresh-btn /><i></i><span>换一换</span>
+                <ul id=hotsearch-content-wrapper />
+                  <li /><a href=/s?wd=%E7%9B%B8%E7%BA%A6%E2%80%9C%E5%9B%9B%E5%8F%B6%E8%8D%89%E2%80%9D+%E5%85%B1%E2%80%A6 /><div /><i></i><span>0</span>
+                      <span>相约“四叶草” 共享中国机遇</span>
+                  <li /><a href=/s?wd=%E5%B0%8F%E5%9F%8E%E6%9C%BA%E5%9C%BA%E5%BC%80%E5%A7%8B%E5%A4%A7%E6%B4%97%%E2%80%A6 /><div /><i></i>
+                      <span>5</span>
+                      <span>小城机场开始大洗牌</span>
+                  <li /><a href=/s?wd=%E4%BD%99%E8%89%B3%E7%BA%A2%E8%A2%AB%E6%9F%A5&sa=fyb_n_homepage&rsv_dl=fy%E2%80%A6 /><div /><i></i>
+                      <span>1</span>
+                      <span>余艳红被查</span>
+                    <span>热</span>
+                  <li /><a href=/s?wd=%E5%88%AB%E5%86%8D%E4%B9%B1%E5%90%83%EF%BC%81%E8%BF%99%E4%BA%9B%E9%A3%9F%%E2%80%A6 /><div /><i></i>
+                      <span>6</span>
+                      <span>别再乱吃！这些食物是结节“助推器”</span>
+                  <li /><a href=/s?wd=%E6%89%8B%E6%9C%BA%E8%B6%8A%E6%9D%A5%E8%B6%8A%E5%8D%B7+%E5%87%AD%E4%BB%80%E2%80%A6 /><div /><i></i>
+                      <span>2</span>
+                      <span>手机越来越卷 凭什么阔直板火了</span>
+                    <span>新</span>
+                  <li /><a href=/s?wd=%E4%B8%9C%E9%A3%8E-61%E5%B7%B2%E5%88%97%E8%A3%85%E7%81%AB%E7%AE%AD%E5%86%%E2%80%A6 /><div /><i></i>
+                      <span>7</span>
+                      <span>东风-61已列装火箭军</span>
+                    <span>热</span>
+                  <li /><a href=/s?wd=%E8%BF%9B%E5%8D%9A%E4%BC%9A%E5%A6%82%E4%BD%95%E8%AE%A9%E5%85%BB%E8%80%81%%E2%80%A6 /><div /><i></i>
+                      <span>3</span>
+                      <span>进博会如何让养老更舒适</span>
+                  <li /><a href=/s?wd=%E6%B8%A9%E7%91%9E%E5%8D%9A%E5%9B%9E%E5%BA%94%E9%9B%B6%E5%B0%81%E7%8E%8B%%E2%80%A6 /><div /><i></i>
+                      <span>8</span>
+                      <span>温瑞博回应零封王楚钦：没想到能赢</span>
+                    <span>热</span>
+                  <li /><a href=/s?wd=54%E5%B2%81%E5%A4%A7%E5%93%A5%E9%9D%A0AI%E7%9F%AD%E5%89%A7%E8%BF%98%E6%B8%E2%80%A6 /><div /><i></i>
+                      <span>4</span>
+                      <span>54岁大哥靠AI短剧还清负债</span>
+                  <li /><a href=/s?wd=%E8%A2%81%E6%88%90%E6%9D%B0%E5%9B%9E%E5%BA%94%E6%88%90%E8%80%81%E8%B5%96%%E2%80%A6 /><div /><i></i>
+                      <span>9</span>
+                      <span>袁成杰回应成老赖：会努力工作还债</span>
+                    <span>新</span><textarea id=hotsearch_data value={ "hotsearch": [ { "card_title": "相约“四叶草” 共享中国机遇", "linkurl": "https%3A/%2Fwww.baidu.com%2Fs%3Fwd%3D%25E7%259B%25B8%25E7…>{ "hotsearch": [ { "card_title": "相约“四叶草” 共享中国机遇", "linkurl": "https%3A/%2Fwww.baidu.com%2Fs%3Fwd%3D%25E7%259B%25B8%25E7…</textarea><textarea id=s_menus_textarea value={ "data": [ { "id": 100, "name": "我的关注", "state": "1", "ismenu": "0" } , { "id": 2, "name": "推荐", "state": "1", "ismenu"…>{ "data": [ { "id": 100, "name": "我的关注", "state": "1", "ismenu": "0" } , { "id": 2, "name": "推荐", "state": "1", "ismenu"…</textarea>
+        <div id=s_side_wrapper />
+          <div id=s_qrcode_feed_new /><div /><svg id=qrcode-home /><div>下载</div><div /><div /><svg /><div>辅助</div><textarea id=s_sync_data />
+      <div id=bottom_layer />
+        <div />
+          <p /><a href=//home.baidu.com>关于百度</a>
+          <p /><a href=http://ir.baidu.com>About Baidu</a>
+          <p /><a href=/duty>使用百度前必读</a>
+          <p /><a href=https://help.baidu.com/question?prod_id=1>帮助中心</a>
+          <p /><a href=https://e.baidu.com/?refer=1271>企业推广</a>
+          <p /><a href=https://beian.mps.gov.cn/#/query/webSearch?code=11010802050023>京公网安备11010802050023号</a>
+          <p /><a href=https://beian.miit.gov.cn>京ICP证030173号</a>
+          <p />
+            <span>互联网新闻信息服务许可证11220180008</span>
+          <p />
+            <span>网络文化经营许可证： 京网文〔2026〕0171-042号</span>
+          <p /><a href=/licence/>信息网络传播视听节目许可证 0110516</a>
+          <p />
+            <span>互联网宗教信息服务许可证编号：京（2026）0000016</span>
+          <p />
+            <span>药品医疗器械网络信息服务备案（京）网药械信息备字（2021）第00159号</span>
+          <p />
+            <span>医疗器械网络交易服务第三方平台备案凭证（京）网械平台备字（2020）第00002号</span>
+          <p />
+            <span>药品网络交易服务第三方平台备案凭证（京）网药平台备字〔2023〕第000002号</span>
+          <p />
+            <span>©2026 Baidu</span>
+          <div />
+            <span></span>
+          <div /><span></span>
+            <div />
+              <div />
+                <div />
+                  <p /><a href=http://ir.baidu.com>About Baidu</a>
+                  <p /><a href=/duty>使用百度前必读</a>
+                  <p /><a href=https://help.baidu.com/question?prod_id=1>帮助中心</a>
+                  <p /><a href=https://e.baidu.com/?refer=1271>企业推广</a>
+                  <p /><a href=https://beian.mps.gov.cn/#/query/webSearch?code=11010802050023>京公网安备11010802050023号</a>
+                <div />
+                  <p /><a href=https://beian.miit.gov.cn>京ICP证030173号</a>
+                  <p />
+                    <span>互联网新闻信息服务许可证11220180008</span>
+                <div />
+                  <p />
+                    <span>网络文化经营许可证： 京网文〔2026〕0171-042号</span>
+                <div />
+                  <p /><a href=/licence/>信息网络传播视听节目许可证 0110516</a>
+                <div />
+                  <p />
+                    <span>互联网宗教信息服务许可证编号：京（2026）0000016</span>
+                <div />
+                  <p />
+                    <span>药品医疗器械网络信息服务备案（京）网药械信息备字（2021）第00159号</span>
+                <div />
+                  <p />
+                    <span>医疗器械网络交易服务第三方平台备案凭证（京）网械平台备字（2020）第00002号</span>
+                <div />
+                  <p />
+                    <span>药品网络交易服务第三方平台备案凭证（京）网药平台备字〔2023〕第000002号</span>
+                <div />
+                  <p />
+                    <span>©2026 Baidu</span>
+    <div id=s_tab />
+      <div /><a href=https://chat.baidu.com/search?pd=csaitab&setype=csaitab&extParamsJson=%7B%22enter_type%22%3A%22searc… /><img src=data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAKgAAABUCAYAAAAWG3zWAAAACXBIWXMAAEJwAABCcAFu8l9tAAAAAX… />
+        <b>网页</b><a href=http://image.baidu.com/i?tn=baiduimage&ps=1&ct=201326592&lm=-1&cl=2&nc=1&ie=utf-8>图片</a><a href=/s?rtt=1&bsst=1&cl=2&tn=news&ie=utf-8>资讯</a><a href=http://v.baidu.com/v?ct=301989888&rn=20&pn=0&db=0&s=25&ie=utf-8>视频</a><a href=http://www.baidu.com/s?pd=note&rpf=pc>笔记</a><a href=https://map.baidu.com/?newmap=1&ie=utf-8&from=pstab&s=s>地图</a><a href=http://tieba.baidu.com/f?fr=wwwt&ie=utf-8>贴吧</a><a href=http://wenku.baidu.com/search?lm=0&od=0&ie=utf-8>文库</a><a href=http://www.baidu.com/more/>更多</a><a>搜索工具</a><input type=hidden id=bsToken name=bsToken value=177a440931cec491967438022c77a8eb />
+---
+interactive: 187 | iframes: 0
