@@ -173,3 +173,12 @@ model=deepseek-flash provider=deepseek status=success
 5. **「创作走不通」根因**：全局默认模型 `DeepSeek-V4-Flash`（ai-infra 网关）当前**无可用渠道**（`model_not_found` 503）→ 所有生成失败。修复路径：在 API 配置页配个人可用 Key，或在「本书模型」给单本覆盖到可用模型。
 
 新增测试：`tests/test_novel_model.py`（覆盖构建/三级回落）。
+
+**写作质量改进（P0+P1，2026-11-06）—— 蒸馏 human-writing / deai-promax / novel-generator**
+
+1. **writer 语言·去AI味铁律**：套词黑名单（不由得/霎时间/殊不知/良久/眼底闪过一丝波澜/喉结滚动/心中五味杂陈等）+ 情绪用动作写 + 对话在做事 + 句长错落 + 逻辑暗线 + 细节跟视角 + 每场戏改变一项 + 世界规则/金手指不得违背。
+2. **语言质检门禁**（`language_quality_gate.py`，确定性不触网）：套词/破折号/翻案句/模型路标 → 硬禁令；句长标准差/情绪直陈/逻辑连词/段落同构 → AI味评分(0-100)。集成 write_chapter：命中硬禁令 → 定向重写 ≤1 轮（`language_rewrite`）→ 仍不过标 flagged 待人工；结果存 generation_params.language_gate。
+3. **细纲爽点节奏标注**：outline_generator 章节细纲加 `smile_point`（type: 装/打脸/人前显圣/升级/收获; intensity: 小/中/大），writer 输出上下文引用爽点与章末钩子强度。
+4. **hard_gate 番茄红线规则7**：低俗/种马后宫高置信词表（种马/后宫/三妻四妾/床笫之欢/翘臀/胸脯等），命中即失败触发重写。
+
+参考来源：`~/.workbuddy/skills/human-writing`（活人感+检查脚本）、`deai-promax`（朱雀五维+网文套词表）、`novel-generator`（爽点节奏公式）。新增测试 `tests/test_language_gate.py` 5 例。

@@ -858,6 +858,72 @@ async def write_chapter(
                     except Exception as save_error:
                         logger.error(f"[write_chapter] 自动保存章节失败: {save_error}")
                         await tracker.add_log("write_chapter", f"自动保存失败: {save_error}", "error")
+
+                    # ── 语言质检门禁（去AI味）：命中硬禁令 → 定向重写 ≤1 轮 → 仍不过标 flagged ──
+                    try:
+                        from app.services.language_quality_gate import scan_language
+                        from app.api.endpoints.workflow_helpers import language_rewrite
+                        from app.models.chapter import Chapter, ChapterStatus
+
+                        gate = scan_language(content)
+                        if gate.failures:
+                            await tracker.add_log(
+                                "write_chapter",
+                                f"语言质检未过（AI味分{gate.ai_score}）：{gate.failure_summary()[:120]}",
+                                "warning",
+                            )
+                        rewritten = ""
+                        if gate.failures:
+                            rewritten = await language_rewrite(
+                                novel_id, content, gate.failure_summary(), request.chapter_number
+                            )
+                            if rewritten:
+                                gate2 = scan_language(rewritten)
+                                await tracker.add_log(
+                                    "write_chapter",
+                                    f"语言质检重写{'通过' if gate2.passed else '后仍不过（AI味分' + str(gate2.ai_score) + '）'}",
+                                    "info" if gate2.passed else "warning",
+                                )
+
+                        from sqlalchemy import select
+                        chapter_row = (await db.execute(
+                            select(Chapter).where(
+                                Chapter.novel_id == novel_id,
+                                Chapter.chapter_number == request.chapter_number,
+                            )
+                        )).scalar_one_or_none()
+                        if chapter_row:
+                            gen_params = dict(chapter_row.generation_params or {})
+                            gen_params["language_gate"] = {
+                                "passed": bool(gate.passed),
+                                "ai_score": gate.ai_score,
+                                "sentence_stddev": gate.sentence_stddev,
+                                "warnings": [
+                                    {"rule": w.rule, "count": w.count} for w in gate.warnings
+                                ],
+                            }
+                            if gate.failures and rewritten:
+                                gen_params["language_gate"]["rewrite_attempted"] = True
+                                if gate2.passed:
+                                    from app.services.hard_gate import count_words as _lg_count
+                                    chapter_row.content = rewritten
+                                    chapter_row.word_count = _lg_count(rewritten)
+                                    gen_params["language_gate"]["rewrite_passed"] = True
+                                    gen_params["language_gate"]["ai_score"] = gate2.ai_score
+                                else:
+                                    chapter_row.status = ChapterStatus.FLAGGED
+                                    gen_params["flagged"] = True
+                                    gen_params["language_gate"]["rewrite_failed"] = gate2.failure_summary()
+                                    logger.warning(
+                                        f"[write_chapter] 章节 {request.chapter_number} 已标记 flagged（语言质检未过）"
+                                    )
+                            if gate.failures and not rewritten:
+                                gen_params["language_gate"]["rewrite_attempted"] = False
+                            chapter_row.generation_params = gen_params
+                            await db.commit()
+                    except Exception as lg_err:
+                        logger.error(f"[write_chapter] 语言质检门禁执行失败: {lg_err}")
+
                 else:
                     await tracker.fail_step("write_chapter", result.error or "撰写失败")
                     

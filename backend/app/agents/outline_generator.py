@@ -215,6 +215,8 @@ class OutlineGeneratorAgent(BaseAgent):
 剧情弧：{arc_context.get('title', '')}
 剧情描述：{arc_context.get('description', '')}
 
+本章必须是爽文节奏的一部分：每 1-2 章至少一个小爽点，3-5 章一个中爽点，8-12 章一个大高潮。请明确标注本章承担哪种爽点。
+
 输出JSON格式：
 {{
   "title": "章节标题",
@@ -223,10 +225,11 @@ class OutlineGeneratorAgent(BaseAgent):
   "characters_present": ["角色A", "角色B"],
   "scene_setting": "场景设定",
   "emotional_arc": "情感弧线",
+  "smile_point": {{"type": "装/打脸/人前显圣/升级/收获", "intensity": "小/中/大"}},
   "cliffhanger_score": 0.7,
   "word_count_target": 3000
 }}"""
-        
+
         react_result = await self.run_react_loop(
             prompt,
             context={"agent_loop_steps": 2},

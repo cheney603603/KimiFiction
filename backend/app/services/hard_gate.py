@@ -11,6 +11,7 @@
 4. 出场角色名全部命中角色卡（防臆造人物，宽松阈值避免误杀）
 5. 境界/力量等级引用与世界观设定表一致（宽松阈值）
 6. 伏笔台账无超期未回收项（P2 上线后启用，台账为空时恒通过）
+7. 番茄审核红线：无低俗/种马后宫类触发词（确定性高置信词表，命中即失败）
 
 强制约束（§5.3 / R1）：本模块只做判定与告警，绝不参与 reward 加权。
 """
@@ -63,6 +64,13 @@ _COMPOUND_SURNAMES = [
 # 姓名锚点正则：复合姓氏优先（最长匹配），其次单字姓氏
 _ANCHOR_RE = re.compile(
     r"(?:" + "|".join(sorted(_COMPOUND_SURNAMES, key=len, reverse=True)) + r"|[" + _SINGLE_SURNAMES + r"])"
+)
+
+
+# 番茄审核红线（deai-promax novel-rules：低俗/种马后宫/性暗示高置信词表，确定性判定）
+_REDLINE_HARD = (
+    "种马", "后宫", "三妻四妾", "脚踏三条船", "脚踏四条船", "床笫之欢",
+    "上床", "翘臀", "胸脯", "玉体", "少儿不宜",
 )
 
 
@@ -160,6 +168,14 @@ class ChapterHardGate:
                 len(overdue_foreshadowing) == 0,
                 f"{len(overdue_foreshadowing)} 项超期: {overdue_foreshadowing[:3]}",
             )
+
+        # 规则7：番茄审核红线（低俗/种马后宫高置信词，命中即失败）
+        redline = [w for w in _REDLINE_HARD if w in content]
+        record(
+            "番茄红线",
+            len(redline) == 0,
+            f"疑似低俗词 {len(redline)} 个: {redline[:5]}",
+        )
 
         return GateResult(
             passed=not failures,

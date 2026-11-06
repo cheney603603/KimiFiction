@@ -1,5 +1,40 @@
-"""工作流辅助函数：写作直达路径的兜底（缺细纲自动补全）。"""
+"""工作流辅助函数：写作直达路径的兜底（缺细纲自动补全、语言质检重写）。"""
 from typing import Any, Dict, List, Optional
+
+
+async def language_rewrite(
+    novel_id: int, content: str, failure_summary: str, chapter_number: int
+) -> str:
+    """语言质检未过 → 定向重写一轮（改稿人视角，只修语言不改情节）。失败/空返回空串。"""
+    from app.services.llm_service import LLMProvider
+    from app.services.llm_service_tracked import TrackedLLMService
+
+    prompt = (
+        "你是中文网文改稿人。下面这章语言质检未通过，硬禁令命中项如下：\n"
+        f"{failure_summary}\n\n"
+        "请在不改变情节、人物性格、对话内容的前提下，修复这些语言问题：\n"
+        "- AI套词（不由得/霎时间/殊不知/良久/眼底闪过一丝波澜/喉结滚动等）换成具体动作或普通说法；\n"
+        "- 删掉破折号，改逗号/句号或直接重写；\n"
+        "- 拆掉“不是…而是…”“看似…实则…”这类翻案句，直接说事实；\n"
+        "- 删模型路标词（值得注意的是/更重要的是/说白了等）。\n"
+        "只输出修订后的完整章节正文，不要输出任何说明、标题或前后缀。\n\n"
+        "原文如下：\n"
+        + content
+    )
+    llm = TrackedLLMService(
+        provider=LLMProvider.DEEPSEEK,
+        novel_id=novel_id,
+        agent_name="language_review",
+        auto_track=True,
+    )
+    try:
+        result = await llm.chat(
+            [{"role": "user", "content": prompt}],
+            description=f"语言质检重写 第{chapter_number}章",
+        )
+    except Exception:
+        return ""
+    return (result or "").strip()
 
 
 async def auto_complete_chapter_outline(

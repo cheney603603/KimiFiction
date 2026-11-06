@@ -38,6 +38,16 @@ class ChapterWriterAgent(BaseAgent):
 8. 设定一句话讲清：境界、势力、金手指不写说明书，靠对话和动作带出来。
 9. 字数控制在{target_words}字左右，场面以小分节推进（场景切换换段即可）。
 
+【语言·去AI味铁律】（务必遵守）
+1. 禁网文AI套词：不由得、霎时间、殊不知、良久、眼底闪过一丝波澜、喉结滚动、周身气场、心中五味杂陈、气氛瞬间凝滞、猛地、死死、狠狠、仿佛、紧接着、嘴角微微上扬、心中暗道、就在这时、顿时、瞬间、恍然大悟、微微一笑、轻轻叹了口气。命中就换具体动作或普通说法。
+2. 情绪用动作写，不直陈："他很愤怒""她心里很难过"这类直陈删掉，换成行为——愤怒就攥紧拳，紧张就看门口或留意手机亮没亮，心虚就记住对方沉默了多久。
+3. 对话在做事：人在试探、遮掩、说服、拖延、靠近或推开；可以答非所问、只说一半。两个人都知道的背景，不为读者重念。对话标签用"说"，不用"淡淡地说""冷冷地说"这类副词。
+4. 句子长短错落：短句(≤8字)、普通句、长句交替出现，禁连续三句同长度，整章句长要拉开，禁通篇工整流水。
+5. 少用显性逻辑连词开段：然而、因此、此外、与此同时、首先、其次、最后 全文各至多一次；段落靠动作和因果承接，不靠"与此同时"硬转。
+6. 细节跟着视角走：只写人物此刻能知道、会在意的事。动作已经写出情绪，就不再补一句解释。
+7. 每场戏结束至少改变一项：信息、关系、计划、风险、权力、理解、情绪——不能只换景色没事情发生。
+8. 世界观与金手指规则是铁板：不得违背已确立的设定；规则可以被人物误解，作者不能临时改规则救场；本章细纲标了爽点，就把它落到实处。
+
 【本章基础约束】
 写作风格：{writing_style}
 环境描写级别：{env_description_level}（minimal=几乎不写景，normal=一句带过，rich=最多两三句）
@@ -178,8 +188,20 @@ class ChapterWriterAgent(BaseAgent):
                 outline_title = outline.get("title", outline.get("outline_title", f"第{chapter_number}章"))
                 outline_summary = outline.get("summary", outline.get("content", ""))
                 outline_content = f"章节标题：{outline_title}\n章节大纲：{outline_summary}"
+                if outline.get("key_events"):
+                    outline_content += f"\n关键事件：{json.dumps(outline.get('key_events'), ensure_ascii=False)}"
                 if outline.get("scenes"):
                     outline_content += f"\n场景设定：{json.dumps(outline.get('scenes'), ensure_ascii=False)}"
+                if outline.get("emotional_arc"):
+                    outline_content += f"\n情绪曲线：{outline.get('emotional_arc')}"
+                smile = outline.get("smile_point") or {}
+                if isinstance(smile, dict) and (smile.get("type") or smile.get("intensity")):
+                    outline_content += (
+                        f"\n本章爽点：{smile.get('intensity', '')} {smile.get('type', '')}——"
+                        "务必把爽点写到实处，放在本章中后段，让读者爽完再吊胃口"
+                    )
+                if outline.get("cliffhanger_score"):
+                    outline_content += f"\n章末钩子强度：{outline.get('cliffhanger_score')}"
             elif outline:
                 outline_content = str(outline)
             
