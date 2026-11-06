@@ -65,7 +65,39 @@ def _find_session() -> str:
     sys.exit(2)
 
 
-def collect(url: str, session: str, mode: str, out_path: str | None) -> str:
+def collect(url: str, session: str, mode: str, out_path: str | None,
+            use_browser: bool = False, proxy: str | None = None) -> str:
+    # 通道一：Python OpenSSL 直连（本机已实测可达 fanqie API / qidian / baidu；
+    #           curl(schannel) 与 Chrome 直连被网络指纹拦截，Python 不受影响）
+    if not use_browser:
+        import urllib.request
+        try:
+            req = urllib.request.Request(url, headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Chrome/120.0 Safari/537.36",
+                "Accept": "text/html,application/json,*/*",
+                "Referer": "https://fanqienovel.com/",
+            })
+            opener = urllib.request.build_opener()
+            if proxy:
+                proxy_handler = urllib.request.ProxyHandler({"http": proxy, "https": proxy})
+                opener = urllib.request.build_opener(proxy_handler)
+            with opener.open(req, timeout=20) as resp:
+                raw = resp.read()
+            try:
+                text = raw.decode("utf-8")
+            except UnicodeDecodeError:
+                text = raw.decode("utf-8", errors="replace")
+            if out_path:
+                Path(out_path).parent.mkdir(parents=True, exist_ok=True)
+                Path(out_path).write_text(text, encoding="utf-8")
+                print(f"[collect] Python 直连成功，已保存 {len(text)} 字符 -> {out_path}")
+            else:
+                print(f"[collect] Python 直连成功，{len(text)} 字符（前 300 字预览）：\n{text[:300]}")
+            return text
+        except Exception as e:
+            print(f"[collect] Python 直连失败（{type(e).__name__}），尝试 opencli 浏览器通道…")
+
+    # 通道二：opencli 驱动真实 Chrome（页面需要 JS 渲染 / 反爬挑战页时使用）
     _run(["browser", session, "open", url])
     state = _run(["browser", session, "state"])
 
@@ -102,11 +134,13 @@ def main():
     parser.add_argument("--mode", choices=["rank", "prose"], default="rank")
     parser.add_argument("--session", default=None, help="opencli 浏览器会话（默认自动探测）")
     parser.add_argument("--out", default=None, help="保存到文件")
+    parser.add_argument("--browser", action="store_true", help="强制走 opencli 浏览器通道（默认 Python 直连优先）")
+    parser.add_argument("--proxy", default=None, help="HTTP/SOCKS5 代理，如 http://127.0.0.1:7897")
     args = parser.parse_args()
 
     session = args.session or _find_session()
     print(f"[collect] session={session} url={args.url} mode={args.mode}")
-    collect(args.url, session, args.mode, args.out)
+    collect(args.url, session, args.mode, args.out, use_browser=args.browser, proxy=args.proxy)
 
 
 if __name__ == "__main__":

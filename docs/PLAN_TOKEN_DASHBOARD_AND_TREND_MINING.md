@@ -30,16 +30,16 @@ model=deepseek-flash provider=deepseek status=success
 - 后端加 `by_model` 拆分没有技术障碍（SQL 现成）。
 - 前端 `frontend/package.json` **已有 recharts ^2.10.3**，无需新依赖。
 
-### 1.2 opencli 驱动浏览器 —— ✅ 工具可用，❌ 目标站被网络拦截
+### 1.2 opencli 驱动浏览器与网络可达性 —— ✅ 工具可用；✅ 目标站 API 现在就能访问（关键修正）
 
-- `opencli v1.8.7` 已安装；`opencli doctor` 显示浏览器桥接正常（Chrome profile `6dd2x4ad` 已连接）。
-- 实测 opencli 能打开页面、读取 DOM、截屏（用百度验证通过）。
-- **番茄小说（fanqienovel.com）与起点中文网（qidian.com / m.qidian.com / fanqie.net）在公司网络下全部不可达**：
-  - `curl` → `schannel: failed to receive handshake`（000）
-  - Chrome（opencli 驱动）→ `chrome-error://chromewebdata/`，`ERR_CONNECTION_RESET`
-  - 对照：`baidu.com` 可达（200 / 302），说明是**域名级防火墙重置**，不是工具或 TLS 指纹问题。
+- `opencli v1.8.7` 已安装；浏览器桥接正常（Chrome profile `6dd2x4ad`）。opencli 能开页、读 DOM、截屏（百度验证通过）。
+- **初版结论"番茄/起点被网络拦截"是工具层面的**，实测修正：
+  - `curl`（Windows schannel）与 Chrome 直连 → `ERR_CONNECTION_RESET`（被拦）；
+  - **Python OpenSSL（urllib / httpx）直连成功**：`fanqienovel.com/api/config/list` → 200，`www.qidian.com` → 202（反爬挑战页），`baidu` → 200；
+  - 用户提供的代理 `127.0.0.1:7897` 的 TLS 隧道实测损坏（CONNECT 200 后立即 EOF），且 **Python 直连根本不需要代理**。
+- **用户参考技能 `fanqie-rank`（.workbuddy/skills/fanqie-rank）已在本机跑通**：`selftest` 三通道全 PASS，真实返回番茄 37 品类 × 阅读/新书双榜数据（含 PUA 字体混淆解码）。演示见 `docs/demo/fanqie_rank_demo.json`（东方仙侠·阅读榜 top5 真实数据）。
 
-**结论**：采集器本身可行（opencli 管线已跑通），但当前企业网络禁止直连这两个小说站。采集必须运行在**能访问目标站的网络**（部署服务器 / 用户个人网络），或降级为**半自动**（用户粘贴样本）。方案按此分阶段设计，见 §3.2。
+**结论修正**：番茄**榜单热点现在就能自动采集**（复用 fanqie-rank 的 Python 直连链路）；番茄**章节正文不在公开接口**（该技能红线：仅榜单与书籍详情，不抓正文）；起点返回 202 挑战页，正文采集需浏览器/进一步处理，列为 P2。
 
 ---
 
@@ -75,27 +75,29 @@ model=deepseek-flash provider=deepseek status=success
 ### 3.1 架构
 
 ```
-opencli browser（真实 Chrome 驱动，绕过纯 curl 的 TLS/反爬限制）
-   → scripts/collect_web_style.py（已建骨架）
-        ├── rank 模式：抓热榜标题/链接 → 热点关键词表 hot_topics（新表）
-        └── prose 模式：抓正文样段   → 清洗 → style_profile.samples / 文风样本表
-   → 供 writer/scene_pipeline 使用（热点做选题提示，样段做风格锚点）
+【热点/榜单】番茄 —— 复用用户技能 fanqie-rank（Python urllib 直连，本机已跑通）
+   scripts/fanqie_rank.py collect/rank
+     37 品类 × 阅读/新书双榜 → 字体混淆解码 → SQLite 快照库 → 跨期分析 → HTML 报告
+     项目侧：新增 hot_topics 表 + 同步任务，把榜单/品类趋势接成「选题提示」输入 writer
+【文风样章】番茄正文不在公开接口（红线：仅榜单与书籍详情）→ 半自动（用户粘贴样章，
+   LLM 设置页入口，P0 已定）+ 书籍简介作风格锚点；起点正文 202 挑战页 → P2 浏览器方案
+【通用采集器】scripts/collect_web_style.py：Python HTTP 直连优先（现在就能用），
+   需要真实浏览器渲染的页面（起点挑战页等）走 opencli browser，支持 --proxy
 ```
 
-`collect_web_style.py` 已实现：会话自动探测、目标页打开、`chrome-error` 识别与**网络拦截诊断**（不静默失败）、文本抽取与落盘。
+### 3.2 分阶段实施（网络障碍已解除，时间线提前）
 
-### 3.2 分阶段实施（受网络条件制约）
-
-| 阶段 | 内容 | 前置条件 |
+| 阶段 | 内容 | 状态 |
 |---|---|---|
-| P0（当前可做） | 采集器骨架 + 热榜/样段清洗入库逻辑；**半自动模式**：用户提供样章文本 → 清洗入库（不依赖外网） | 无 |
-| P1 | 在**可访问目标站的网络**跑通 rank/prose 采集 → 热点关键词表 → 选题建议 | 部署网络放开小说站 |
-| P2 | 文风样段自动进 `style_profile`，场景管线按样本模仿（可选接入评测闭环验证文风相似度） | P1 数据量 ≥ 阈值 |
+| P0 | 半自动样章入库（LLM 设置页入口，清洗 → style_profile.samples） | 待实施 |
+| P1 | 番茄热榜自动采集接入：`hot_topics` 表 + 同步任务 + 选题提示（复用 fanqie-rank） | **现在可做**（本机已通） |
+| P2 | 起点正文/文风样段（浏览器方案 / 挑战页处理）；可选接入评测闭环验证文风相似度 | 待定 |
 
 ### 3.3 合规红线
 
-- 只采集**公开榜单与公开样章**，遵守目标站 robots/ToS 与合理频率（已有 RPM/并发限制可复用）；
-- **不抓盗版聚合站**；采集内容仅用于风格特征学习，不直接复制正文入库。
+- 番茄公开接口仅**榜单与书籍详情**；不抓章节正文（沿用 fanqie-rank 技能红线）；
+- 遵守合理频率（复用 RPM/并发限制）；采集内容仅用于风格/选题特征学习，不直接复制正文入库；
+- 不抓盗版聚合站。
 
 ### 3.4 演示（已产出）
 
@@ -110,13 +112,14 @@ opencli browser（真实 Chrome 驱动，绕过纯 curl 的 TLS/反爬限制）
 
 ### 功能一（用量看板）
 1. `usage_service` 加 `by_model` + 新接口 `/usage/models`；单测覆盖聚合正确性
-2. `Usage.tsx` 页面 + 路由/导航；`npm run build`（tsc）通过
+2. `Usage.tsx` 页面 + 路由/导航（**全部登录用户可见**）；`npm run build`（tsc）通过
 3. 验收：真实生成一本书后，看板展示按模型/阶段/章节的 token 与重试，数值与 DB 一致
 
-### 功能二（采集）
-1. P0：`hot_topics` 表 + 半自动样章清洗入库（本网络可做）
-2. P1/P2：换网络后实测番茄/起点热榜与样段采集，落库并接入 writer 提示
-3. 验收：P1 热榜表出现 ≥1 个真实榜单条目；P2 新生成章节能体现样本文风
+### 功能二（热点/文风采集）
+1. P0：半自动样章入库（**LLM 设置页入口**，清洗 → `style_profile.samples`）
+2. P1：番茄热榜自动采集接入 —— 项目内新增 `hot_topics` 表 + 定时同步任务（复用 fanqie-rank 的 Python 直连链路，本机已通），榜单/品类趋势接成选题提示输入 writer
+3. P2（可选）：起点正文样段（浏览器/挑战页方案）
+4. 验收：P1 热榜表出现 ≥1 个真实榜单条目（演示已产出）；P0 样章入库后新章节能体现样本文风
 
 ---
 
@@ -126,11 +129,18 @@ opencli browser（真实 Chrome 驱动，绕过纯 curl 的 TLS/反爬限制）
 |---|---|
 | `docs/demo/usage_dashboard_demo.html` | 用量看板静态演示（真实数据） |
 | `docs/demo/usage_dashboard_demo.png` | 看板渲染截图 |
+| `docs/demo/fanqie_rank_demo.json` | **番茄真实榜单数据**（东方仙侠·阅读榜 top5，含解码结果） |
 | `docs/demo/collector_baidu_demo.txt` | 采集器成功路径抽取样本 |
-| `scripts/collect_web_style.py` | 采集器骨架（含网络拦截诊断） |
+| `scripts/collect_web_style.py` | 通用采集器骨架（Python 直连优先 + opencli 兜底 + `--proxy`） |
 
-## 6. 待确认项
+## 6. 已确认项与待确认项
 
-1. 用量看板页面是否加入 MVP 导航（还是仅 Pro 可见）？
-2. 采集 P0 的半自动样章入口放哪（LLM 设置页 / 小说详情）？
-3. 部署网络是否能放开小说站（决定 P1/P2 能否推进）？
+**已确认（用户）**：
+1. 用量看板 → **全部登录用户可见**
+2. P0 半自动样章入口 → **LLM 设置页**
+3. 网络 → **Python 直连实测可用（番茄榜单可自动采集）**，代理 127.0.0.1:7897 TLS 隧道损坏不可用但无需使用
+
+**待确认**：
+1. P2 起点正文样段是否推进（需浏览器处理 202 挑战页，涉及风控风险与投入）
+2. 番茄热榜同步任务的频率与范围（每日全量 37 品类 vs 按需单品类）
+3. 选题提示进入 writer 的方式（写进章节细纲 prompt / 仅生成前提示）
