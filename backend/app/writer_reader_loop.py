@@ -365,6 +365,16 @@ class WriterReaderLoop:
         # 取最佳草稿
         final_draft = self.best_state.draft if self.best_state else self.current_state.draft
 
+        # 全部轮次失败且未产出正文 → 如实返回失败（否则上层会存"已完成空章节"）
+        if not final_draft or not final_draft.strip():
+            return {
+                "success": False,
+                "error": "Writer 全部轮次失败，未产出正文（网关过载或 LLM 不可用）",
+                "final_draft": "",
+                "total_rounds": len(self.loop_history),
+                "loop_history": self.loop_history,
+            }
+
         # 返回最终结果
         return {
             "success": True,

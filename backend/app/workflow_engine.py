@@ -1868,6 +1868,15 @@ class WorkflowEngine:
         )
         r = await pipe.run(outline, self.state.characters or [], pipe_ctx)
 
+        content = r.get("final_draft", "") or ""
+        if not content or not content.strip():
+            logger.warning(f"[write_chapter_v2] 场景管线未产出正文(第{chapter_number}章)，按失败返回")
+            return TaskResult(
+                success=False,
+                phase=WorkflowPhase.CHAPTER_WRITING.value,
+                error="场景管线未产出正文（网关过载或 LLM 不可用），未生成章节",
+            )
+
         self.state.recent_chapter_types = recent + [chapter_type]
         try:
             await self.save_state()
@@ -1878,7 +1887,7 @@ class WorkflowEngine:
             success=True,
             phase=WorkflowPhase.CHAPTER_WRITING.value,
             data={
-                "content": r.get("final_draft", ""),
+                "content": content,
                 "word_count": r.get("word_count", 0),
                 "reader_feedback": {},
                 "writer_reader_loop_history": [],

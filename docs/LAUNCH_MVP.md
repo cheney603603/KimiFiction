@@ -2,8 +2,8 @@
 
 | 项 | 内容 |
 |---|---|
-| 文档版本 | v0.2（M1/M2 已落地） |
-| 日期 | 2026-11-04 |
+| 文档版本 | v0.3（M1/M2 已落地，M3 A/B 执行完成 + 可观测性落地） |
+| 日期 | 2026-11-06 |
 | 产品形态 | **作者工具**（用户用 AI 生成并管理自己的小说），非阅读平台 |
 | 计费模型 | **Bring Your Own Key（BYOK）**：两种 tier 的 token 成本都由用户自己的 API Key 承担；平台只卖"编排产能" |
 | 决策记录 | 关联 `docs/NOVEL_QUALITY_UPGRADE_PLAN.md` §0 D1–D5 |
@@ -18,10 +18,14 @@
 | M1 额度墙 | users tier/quota 字段、novels user_id（存量回填）、quota_service、建书/生成 402 前置检查、`GET /quota/status`、`POST /quota/tier`（管理员） | 同上 |
 | M2 Pro 解锁 | 批量管线 `run_novel_pipeline.py` 增加 `--user` 归属 + Pro tier 门槛；`WORKER_CONCURRENCY`/`PRO_BATCH_ENABLED` 配置（批量开关接入 `/quota/status` 供管线读取）；revise 计入每月章节额度；隐藏非 MVP 导航（规则优化/Agent协作/图谱入口） | 5 单测 + tsc |
 | M3（部分） | 按用户生成并发限制 `gen_limiter.py`（free 同刻 1 个、Pro=`PRO_CONCURRENCY`）；盲读 A/B 脚本 `scripts/blind_ab_test.py`（5 固定细纲 + protocol.md 打分表，A/B 各启一个 V2 开关不同的后端实例） | 21 单测 |
+| M3 A/B 执行 | 盲读 A/B 生成完成（variant A=novel 9、variant B=novel 8，各 5 章入库），`--finalize` 已出 `blind_ab/评审包/01~10.md` + `答案对照.txt` + `评分表.md`（seed 20261105 打乱） | 10 章文件 |
+| M3 可观测性 | `llm_usage_logs` 用量表 + `GET /usage/novel/{id}`、`/usage/summary`（流式 `stream_options.include_usage` 取精确 token）；全局 RPM 滑动窗口限速 `LLM_RPM_LIMIT=40`；盲读脚本 `--parallel N` 多章并发；阶段/Agent 归属（chapter_writing 细分 writer/reader/review） | 实测 A 书 74,377 token |
 
 **部署前提**：`backend/.env` 必须设置 `APP_KEY_ENCRYPT_SECRET`（未设置时用户无法保存 Key）。
 **遗留**：真支付接入、邀请码发放、小说列表按用户隔离（D5 暂公开）、免费层参数管理 UI；
-盲读 A/B 验收（§8）已具备生成脚本 `scripts/blind_ab_test.py`，待人工执行。
+盲读评审包已生成，待人工盲读打分（§8.2 通过标准：B 自然度中位数 ≥3.5 且被判"AI写"比例 ≤50%）。
+**操作注意**：联影网关（ai-infra）资源池实测只能承受**单路并发生成**——`--parallel 2` 会持续 503「资源池已满」；
+A/B 均须 `--parallel 1` 顺序跑（RPM 限速防的是请求速率，防不了并发流饱和），等网关扩容后再放开并行。
 
 
 ## 1. 商业模型一句话

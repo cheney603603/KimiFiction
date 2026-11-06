@@ -50,8 +50,8 @@ async def api_post(path: str, json_data: dict, token: Optional[str] = None) -> d
 
 
 async def api_get(path: str, token: str, params: Optional[dict] = None) -> httpx.Response:
-    """GET 请求辅助"""
-    headers = {"Authorization": f"Bearer {token}"}
+    """GET 请求辅助（空 token 不带头，实体端点已公开）"""
+    headers = {"Authorization": f"Bearer {token}"} if token else {}
     async with httpx.AsyncClient(base_url=BASE_URL, timeout=30.0) as client:
         resp = await client.get(f"{API_PREFIX}{path}", headers=headers, params=params)
         return resp
@@ -363,23 +363,35 @@ class TestEntityCRUD:
 
     @pytest.mark.asyncio
     async def test_create_empty_entity_list(self):
-        """列出无实体的类型应返回空列表"""
-        # 创建一个新小说并验证其没有实体
+        """新小说（尚无实体）的实体列表应为空"""
+        # 免费层每用户限 1 本书：用独立测试用户建一本无实体的新书，验证空列表契约
+        fresh_user = {
+            "username": f"empty_ab_{datetime.now().strftime('%m%d%H%M%S')}",
+            "email": f"empty_ab_{datetime.now().strftime('%m%d%H%M%S')}@test.com",
+            "password": "TestPass123!",
+        }
+        resp = await api_post("/auth/register", fresh_user)
+        assert resp.status_code in (200, 201), f"register failed: {resp.status_code} {resp.text}"
+        resp = await api_post("/auth/login", {
+            "username": fresh_user["username"],
+            "password": fresh_user["password"],
+        })
+        data = resp.json()
+        token = data.get("access_token") or data.get("token", "")
+        assert token, f"No token in response: {data}"
+
         resp = await api_post("/novels", {
             "title": "空测试小说",
             "genre": "fantasy",
-        }, token=ctx.token)
-        assert resp.status_code in (200, 201)
+        }, token=token)
+        assert resp.status_code in (200, 201), f"create novel failed: {resp.status_code} {resp.text}"
         empty_novel_id = resp.json().get("id") or 0
 
-        resp = await api_get(f"/entities/novel/{empty_novel_id}", ctx.token)
+        resp = await api_get(f"/entities/novel/{empty_novel_id}", token)
         assert resp.status_code == 200
         data = resp.json()
         assert data["total"] == 0
         assert data["items"] == []
-
-        # 清理空测试小说
-        await api_delete(f"/novels/{empty_novel_id}", ctx.token)
 
 
 # ─── 测试用例集 5: 实体关系 ──────────────────────────────────
