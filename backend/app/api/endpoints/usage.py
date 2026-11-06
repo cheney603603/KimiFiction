@@ -26,3 +26,12 @@ async def get_usage_summary(
 ):
     """全局用量汇总（最近 5000 条）。"""
     return await LLMUsageService(db).global_summary()
+
+
+@router.get("/models")
+async def get_usage_models(
+    current_user: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """按模型聚合用量（全局，最近 5000 条）—— 用量看板按模型图数据源。"""
+    return await LLMUsageService(db).models_summary()

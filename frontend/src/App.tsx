@@ -13,6 +13,8 @@ import { OutlineEditor } from './pages/OutlineEditor'
 import { WorkflowChat } from './pages/WorkflowChat'
 import { WorkflowPage } from './pages/WorkflowPage'
 import { LLMSettings } from './pages/LLMSettings'
+import { Usage } from './pages/Usage'
+import { Rank } from './pages/Rank'
 import { Login } from './pages/Login'
 import { Register } from './pages/Register'
 // 多智能体协作与评测页面
@@ -63,6 +65,8 @@ function App() {
         <Route path="novel/:novelId/workflow" element={<WorkflowChat />} />
         <Route path="novel/:novelId/workflow/new" element={<WorkflowPage />} />
         <Route path="settings/llm" element={<LLMSettings />} />
+        <Route path="usage" element={<Usage />} />
+        <Route path="rank" element={<Rank />} />
 
         {/* 多智能体协作与评测 */}
         <Route path="workflow/graph" element={<AgentWorkflow />} />

@@ -101,10 +101,11 @@ model=deepseek-flash provider=deepseek status=success
 
 ### 3.4 演示（已产出）
 
-- `scripts/collect_web_style.py`：
-  - `--url https://www.qidian.com` → 输出"网络策略拦截（ERR_CONNECTION_RESET）"诊断
-  - `--url https://www.baidu.com` → 正常抽取页面文本（14812 字符，见 `docs/demo/collector_baidu_demo.txt`）
-- 说明：百度仅为证明**管线可用**；番茄/起点需换网络后即可切换目标。
+- `scripts/collect_web_style.py`（Python 直连优先 + opencli 兜底 + `--proxy`）：
+  - `--url https://fanqienovel.com/api/config/list` → Python 直连成功（真实 JSON）
+  - `--url https://www.qidian.com` → 返回反爬挑战页（202，供 P2 浏览器方案处理）
+  - `--url https://www.baidu.com` → 正常抽取页面文本（14812 字符）
+- 番茄榜单实时数据演示：`docs/demo/fanqie_rank_demo.json`（东方仙侠·阅读榜 top5，与本机 fanqie-rank 技能实测一致）。
 
 ---
 
@@ -144,3 +145,21 @@ model=deepseek-flash provider=deepseek status=success
 1. P2 起点正文样段是否推进（需浏览器处理 202 挑战页，涉及风控风险与投入）
 2. 番茄热榜同步任务的频率与范围（每日全量 37 品类 vs 按需单品类）
 3. 选题提示进入 writer 的方式（写进章节细纲 prompt / 仅生成前提示）
+
+---
+
+## 7. 落地状态（已实现并联调验证）
+
+**P0 用量看板 + 番茄榜单页已上网页（2026-11-06）**
+
+| 项 | 后端 | 前端 | 验证 |
+|---|---|---|---|
+| 用量按模型聚合 | `GET /api/v1/usage/models`（`llm_usage_service.models_summary`） | `frontend/src/pages/Usage.tsx`（KPI + 模型饼图 + 章节/阶段柱图） | 浏览器实测：小说9 → 12 调用 / 74,377 tokens / deepseek-flash 饼图 / 第3-5章分布 |
+| 番茄榜单 | `GET /api/v1/rank/genres`（37品类）+ `GET /api/v1/rank/fanqie`（快照缓存/refresh） | `frontend/src/pages/Rank.tsx`（男/女频、品类、阅读/新书、Top N、实时刷新） | 浏览器实测：西方奇幻阅读榜 20 行真实解码数据（书名/作者/字数/读数/连载状态/位次变化） |
+
+配套：
+- `hot_topics` 表新增 `rank_change` 列（需 ALTER，create_all 不迁移旧表 —— 已手动执行）。
+- 榜单名 PUA 混淆逐请求轮换 → 后端恒回查 `/api/book/info`（明文）保证书名/作者准确（`decode_ok`）。
+- 导航：`番茄榜单`（Flame）/ `用量看板`（Gauge）已加入 Layout；路由 `App.tsx` 已挂 `/rank`、`/usage`。
+- 单元测试：`backend/tests/test_rank.py` 新增 9 个（decode / fetch_rank 字段变换与回落 / categories 分组 / by_model 聚合），不触网全过。
+- `test_entity_e2e.py` 增加 `trust_env=False`：本机系统代理（127.0.0.1:7897）会令 httpx 把 localhost 请求导向代理返回 502，显式禁用后 e2e 34 过。

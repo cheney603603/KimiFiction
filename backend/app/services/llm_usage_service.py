@@ -1,10 +1,25 @@
-"""LLM 用量日志服务：记录与聚合（开书/每章 token、各阶段重试次数）。"""
+"""LLM 用量日志服务：记录与聚合（开书/每章 token、各阶段重试次数、按模型）。"""
 from typing import Any, Dict, List, Optional
 
 from sqlalchemy import select, func
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.models.llm_usage_log import LLMUsageLog
+
+
+def _by_model(rows: List[LLMUsageLog]) -> Dict[str, Dict[str, int]]:
+    """按 model 聚合：{model: {calls, tokens_in, tokens_out, retries, errors}}"""
+    out: Dict[str, Dict[str, int]] = {}
+    for r in rows:
+        key = r.model or "未知"
+        m = out.setdefault(key, {"calls": 0, "tokens_in": 0, "tokens_out": 0,
+                                  "retries": 0, "errors": 0})
+        m["calls"] += 1
+        m["tokens_in"] += r.tokens_in
+        m["tokens_out"] += r.tokens_out
+        m["retries"] += r.retry_count
+        m["errors"] += 1 if r.status == "error" else 0
+    return out
 
 
 class LLMUsageService:
@@ -62,6 +77,7 @@ class LLMUsageService:
             "error_calls": len(failed),
             "retried_calls": len(retry_calls),
             "total_retries": sum(r.retry_count for r in rows),
+            "by_model": _by_model(rows),
             "by_phase": phases,
             "by_chapter": chapters,
         }
@@ -80,4 +96,24 @@ class LLMUsageService:
             "total_tokens": total_in + total_out,
             "error_calls": sum(1 for r in rows if r.status == "error"),
             "total_retries": sum(r.retry_count for r in rows),
+            "by_model": _by_model(rows),
+        }
+
+    async def models_summary(self, limit: int = 5000) -> Dict[str, Any]:
+        """按模型聚合（全局，最近 limit 条）—— 用量看板按模型图的数据源。"""
+        rows = (await self.db.execute(
+            select(LLMUsageLog).order_by(LLMUsageLog.created_at.desc()).limit(limit)
+        )).scalars().all()
+        by_model = _by_model(rows)
+        total_calls = sum(m["calls"] for m in by_model.values())
+        total_in = sum(m["tokens_in"] for m in by_model.values())
+        total_out = sum(m["tokens_out"] for m in by_model.values())
+        return {
+            "total_calls": total_calls,
+            "total_tokens_in": total_in,
+            "total_tokens_out": total_out,
+            "total_tokens": total_in + total_out,
+            "total_retries": sum(m["retries"] for m in by_model.values()),
+            "total_errors": sum(m["errors"] for m in by_model.values()),
+            "by_model": by_model,
         }

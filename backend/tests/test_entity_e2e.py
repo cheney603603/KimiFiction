@@ -44,7 +44,7 @@ ctx = TestContext()
 async def api_post(path: str, json_data: dict, token: Optional[str] = None) -> dict:
     """POST 请求辅助"""
     headers = {"Authorization": f"Bearer {token}"} if token else {}
-    async with httpx.AsyncClient(base_url=BASE_URL, timeout=30.0) as client:
+    async with httpx.AsyncClient(base_url=BASE_URL, timeout=30.0, trust_env=False) as client:
         resp = await client.post(f"{API_PREFIX}{path}", json=json_data, headers=headers)
         return resp
 
@@ -52,7 +52,7 @@ async def api_post(path: str, json_data: dict, token: Optional[str] = None) -> d
 async def api_get(path: str, token: str, params: Optional[dict] = None) -> httpx.Response:
     """GET 请求辅助（空 token 不带头，实体端点已公开）"""
     headers = {"Authorization": f"Bearer {token}"} if token else {}
-    async with httpx.AsyncClient(base_url=BASE_URL, timeout=30.0) as client:
+    async with httpx.AsyncClient(base_url=BASE_URL, timeout=30.0, trust_env=False) as client:
         resp = await client.get(f"{API_PREFIX}{path}", headers=headers, params=params)
         return resp
 
@@ -60,7 +60,7 @@ async def api_get(path: str, token: str, params: Optional[dict] = None) -> httpx
 async def api_put(path: str, json_data: dict, token: str) -> httpx.Response:
     """PUT 请求辅助"""
     headers = {"Authorization": f"Bearer {token}"}
-    async with httpx.AsyncClient(base_url=BASE_URL, timeout=30.0) as client:
+    async with httpx.AsyncClient(base_url=BASE_URL, timeout=30.0, trust_env=False) as client:
         resp = await client.put(f"{API_PREFIX}{path}", json=json_data, headers=headers)
         return resp
 
@@ -68,7 +68,7 @@ async def api_put(path: str, json_data: dict, token: str) -> httpx.Response:
 async def api_delete(path: str, token: str, params: Optional[dict] = None) -> httpx.Response:
     """DELETE 请求辅助"""
     headers = {"Authorization": f"Bearer {token}"}
-    async with httpx.AsyncClient(base_url=BASE_URL, timeout=30.0) as client:
+    async with httpx.AsyncClient(base_url=BASE_URL, timeout=30.0, trust_env=False) as client:
         resp = await client.delete(f"{API_PREFIX}{path}", headers=headers, params=params)
         return resp
 
@@ -92,7 +92,7 @@ class TestSystemBasics:
     @pytest.mark.asyncio
     async def test_health_check(self):
         """后端健康检查"""
-        async with httpx.AsyncClient(base_url=BASE_URL, timeout=10.0) as client:
+        async with httpx.AsyncClient(base_url=BASE_URL, timeout=10.0, trust_env=False) as client:
             resp = await client.get("/health")
         assert resp.status_code in (200, 404), f"Health check failed: {resp.status_code}"
         # 部分后端没有显式 /health 端点，404 也说明服务在运行
@@ -100,7 +100,7 @@ class TestSystemBasics:
     @pytest.mark.asyncio
     async def test_api_root(self):
         """API 根路径可达"""
-        async with httpx.AsyncClient(base_url=BASE_URL, timeout=10.0) as client:
+        async with httpx.AsyncClient(base_url=BASE_URL, timeout=10.0, trust_env=False) as client:
             resp = await client.get(f"{API_PREFIX}/novels")
         assert resp.status_code in (200, 401), f"API root failed: {resp.status_code}"
         # 401 表示需要认证，说明服务正常
@@ -587,7 +587,7 @@ class TestAPIErrorHandling:
     @pytest.mark.asyncio
     async def test_public_read_access(self):
         """实体读取为公开接口（与全站匿名设计一致，如后续加鉴权需同步改造）"""
-        async with httpx.AsyncClient(base_url=BASE_URL, timeout=10.0) as client:
+        async with httpx.AsyncClient(base_url=BASE_URL, timeout=10.0, trust_env=False) as client:
             resp = await client.get(f"{API_PREFIX}/entities/novel/1")
         assert resp.status_code == 200
 

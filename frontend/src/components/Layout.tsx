@@ -1,5 +1,5 @@
 import { Link, useLocation, useNavigate, Outlet } from 'react-router-dom'
-import { BookOpen, Home, Settings, Moon, Sun, User, LogOut, BarChart3, Fuel } from 'lucide-react'
+import { BookOpen, Home, Settings, Moon, Sun, User, LogOut, BarChart3, Fuel, Gauge, Flame } from 'lucide-react'
 import { useState, useEffect } from 'react'
 import { quotaApi } from '../services/api'
 import { QuotaModal } from './QuotaModal'
@@ -67,6 +67,8 @@ export function Layout(_props: LayoutProps) {
 
   const navItems = [
     { path: '/', label: '工作台', icon: Home },
+    { path: '/rank', label: '番茄榜单', icon: Flame },
+    { path: '/usage', label: '用量看板', icon: Gauge },
     { path: '/evaluation', label: '八维评测', icon: BarChart3 },
     { path: '/settings/llm', label: 'API配置', icon: Settings },
   ]

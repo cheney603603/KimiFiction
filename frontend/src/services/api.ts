@@ -383,6 +383,25 @@ export const quotaApi = {
     api.post('/quota/tier', data),
 }
 
+// LLM 用量统计
+export const usageApi = {
+  // 单本书用量（含 by_model/by_phase/by_chapter）
+  novelUsage: (novelId: number) => api.get(`/usage/novel/${novelId}`),
+  // 全局汇总
+  summary: () => api.get('/usage/summary'),
+  // 按模型聚合（用量看板按模型图）
+  models: () => api.get('/usage/models'),
+}
+
+// 番茄榜单
+export const rankApi = {
+  // 37 个品类（男频/女频）
+  genres: () => api.get('/rank/genres'),
+  // 榜单查询（refresh=1 强制实时刷新）
+  fanqie: (params: { gender: string; genre_id: string; genre?: string; rank_type: string; top?: number; refresh?: number }) =>
+    api.get('/rank/fanqie', { params }),
+}
+
 // 记忆相关API
 export const memoryApi = {
   list: (novelId: number, params?: { node_type?: string; unresolved_only?: boolean }) =>
